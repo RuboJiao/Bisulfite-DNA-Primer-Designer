@@ -154,12 +154,8 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
               const globalIdx = pStart + i;
               const templateBase = strandSeq[globalIdx];
               const isCompatible = isBaseCompatible(b, templateBase);
-              const isDegenerate = !['A', 'T', 'C', 'G'].includes(b.toUpperCase());
+              const isDegenerate = !['A', 'T', 'C', 'G', 'a', 't', 'c', 'g'].includes(b);
               
-              // 规则更新：
-              // 1. 不兼容 -> 红色背景
-              // 2. 兼容且是简并碱基 -> 绿色背景 (emerald-500)
-              // 3. 兼容且是普通碱基 -> 不显示高亮 (不高亮即维持引物白色背景)
               let highlightClass = '';
               if (!isCompatible) {
                 highlightClass = 'bg-rose-500 text-white';
@@ -173,7 +169,8 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
                   style={{ width: `${BASE_WIDTH_PX}px` }} 
                   className={`text-center shrink-0 h-full flex items-center justify-center ${highlightClass}`}
                 >
-                  {b.toUpperCase()}
+                  {/* 此处不再转换大写，显示原始大小写以区分修饰 */}
+                  {b}
                 </div>
               );
             })}

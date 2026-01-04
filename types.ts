@@ -8,13 +8,21 @@ export enum StrandType {
   CTOB = 'CTOB'
 }
 
+export interface ThermodynamicSettings {
+  oligoConc: number; // µM
+  naConc: number;    // mM
+  mgConc: number;    // mM
+  dntpConc: number;  // mM
+}
+
 export interface Primer {
   id: string;
   name: string;
-  sequence: string;
+  sequence: string; // 存储时保留大小写，小写代表 LNA
   strand: StrandType;
   start: number; // Index in the 1-to-1 alignment (0-based)
   length: number;
+  isMGB?: boolean; // 新增：是否具有 MGB 修饰
 }
 
 export interface SelectionState {
