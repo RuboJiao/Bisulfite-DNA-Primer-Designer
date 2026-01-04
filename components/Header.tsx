@@ -64,11 +64,11 @@ export const Header: React.FC<HeaderProps> = ({
             value={mismatches}
             onChange={(e) => setMismatches(Number(e.target.value))}
             disabled={!hasSequence}
-            className="w-full h-full bg-transparent pl-3 pr-8 text-[10px] font-black uppercase outline-none appearance-none cursor-pointer text-slate-700 border-none"
+            className="w-full h-full bg-transparent pl-3 pr-8 text-[10px] font-black outline-none appearance-none cursor-pointer text-slate-700 border-none"
           >
-            <option value={0}>0nt 错配</option>
-            <option value={1}>1nt 错配</option>
-            <option value={2}>2nt 错配</option>
+            <option value={0}>0Nt 错配</option>
+            <option value={1}>1Nt 错配</option>
+            <option value={2}>2Nt 错配</option>
           </select>
           <div className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-500">
             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7" /></svg>
@@ -89,11 +89,11 @@ export const Header: React.FC<HeaderProps> = ({
       <div className="flex items-center gap-2 my-auto">
         <button 
           onClick={onOpenSettings}
-          className="w-9 h-9 flex items-center justify-center bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-all active:scale-95"
+          className="w-9 h-9 flex items-center justify-center bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-all active:scale-95 group shadow-sm shrink-0"
           title="设置 Tm 计算参数"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+          <svg className="w-5 h-5 transition-transform group-hover:rotate-45 duration-500 overflow-visible" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
           </svg>
         </button>

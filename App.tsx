@@ -239,17 +239,17 @@ const App: React.FC = () => {
           {selection && (
             <div className="absolute bottom-8 left-1/2 -translate-x-1/2 bg-slate-900/95 text-white px-8 py-5 rounded-[2rem] shadow-2xl flex items-center gap-10 border border-white/10 backdrop-blur-lg animate-in slide-in-from-bottom-6 duration-500 z-50">
               <div className="flex flex-col">
-                <span className="text-[10px] text-white/50 uppercase font-black tracking-widest text-xs">Tm</span>
+                <span className="text-white/50 font-black tracking-widest text-[10px]">Tm</span>
                 <span className="text-2xl font-black font-mono text-emerald-400">{currentStats.tm.toFixed(1)}<span className="text-sm">°C</span></span>
               </div>
               <div className="w-px h-10 bg-white/20" />
               <div className="flex flex-col">
-                <span className="text-[10px] text-white/50 uppercase font-black tracking-widest">Bases</span>
+                <span className="text-[10px] text-white/50 font-black tracking-widest">Bases</span>
                 <span className="text-2xl font-black font-mono">{selectedSequence.length}<span className="text-sm"> bp</span></span>
               </div>
               <div className="w-px h-10 bg-white/20" />
               <div className="flex flex-col">
-                <span className="text-[10px] text-white/50 uppercase font-black tracking-widest">Active Strand</span>
+                <span className="text-[10px] text-white/50 font-black tracking-widest">Active Strand</span>
                 <span className="text-sm font-bold text-blue-300">{selection.strand} : {Math.min(selection.start, selection.end) + 1} → {Math.max(selection.start, selection.end) + 1}</span>
               </div>
             </div>

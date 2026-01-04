@@ -68,8 +68,9 @@ export interface ThermodynamicResult {
 }
 
 /**
- * 计算引物热力学参数。
- * 遵循 SantaLucia (1998) NN 模型与 Owczarzy (2004/2008) 盐校正。
+ * 核心 Tm 计算逻辑
+ * 整合 SantaLucia 1998 NN 模型、Owczarzy 2008 盐修正、
+ * 以及针对长引物优化的 LNA 长度依赖模型与 MGB 序列相关性模型。
  */
 export const calculateThermodynamics = (
   sequence: string, 
@@ -79,10 +80,11 @@ export const calculateThermodynamics = (
   const n = sequence.length;
   if (n < 2) return { tm: 0, dg: 0, gc: 0 };
 
-  const lnaCount = (sequence.match(/[A-Z]/g) || []).length;
+  // 1. 分离修饰信息：大写字母视为 LNA 修饰碱基
+  const lnaPositions = sequence.split('').map((char, i) => /[A-Z]/.test(char) ? i : -1).filter(i => i !== -1);
   const seq = sequence.toLowerCase().split('').map(b => IUPAC_MAP[b] ? IUPAC_MAP[b][0].toLowerCase() : b).join('');
 
-  // 1. 计算核心 ΔH 和 ΔS
+  // 2. 计算核心 ΔH 和 ΔS (DNA/DNA NN 模型)
   let dh = 0; 
   let ds = 0; 
 
@@ -92,60 +94,73 @@ export const calculateThermodynamics = (
     if (p) { dh += p.h; ds += p.s; }
   }
 
-  // 2. 加上 Initiation (SantaLucia 1998)
-  // 全局 Initiation: ΔH=0, ΔS=-10.8
-  ds -= 10.8;
-
-  // 3. 末端 A-T 惩罚: 每个末端 A-T 增加 ΔH=2.3, ΔS=4.1
+  // 起始项修正 (Terminal Initiation SantaLucia 1998)
   const first = seq[0];
   const last = seq[n - 1];
-  if (first === 'a' || first === 't') { dh += 2.3; ds += 4.1; }
-  if (last === 'a' || last === 't') { dh += 2.3; ds += 4.1; }
+  if (first === 'g' || first === 'c') { dh += 0.1; ds -= 2.8; }
+  else { dh += 2.3; ds += 4.1; }
+  if (last === 'g' || last === 'c') { dh += 0.1; ds -= 2.8; }
+  else { dh += 2.3; ds += 4.1; }
 
-  const R = 1.987;
+  const R = 1.987; 
   const T_std = 273.15 + 37; 
-  const k = (settings.oligoConc * 1e-6) / 4; // Ct/4 for non-self-complementary
+  const Ct = settings.oligoConc * 1e-6; 
+  const k = Ct / 4; 
   
-  // 4. 盐校正计算 (Owczarzy 2004 模型)
-  // 正确的等效钠离子计算 (Na_eq = [Na+] + 120 * sqrt([Mg++] - [dNTPs]))
-  // 注意：公式内部 sqrt 使用的是 mM 单位，最后除以 1000 转回 M
-  const na_mM = settings.naConc;
-  const mg_mM = settings.mgConc;
-  const dntp_mM = settings.dntpConc;
-  const freeMg_mM = Math.max(0, mg_mM - dntp_mM);
-  
-  // 等效钠离子摩尔浓度 (M)
-  const naEq = (na_mM + 120 * Math.sqrt(freeMg_mM)) / 1000;
-  
-  // 计算 1M NaCl 下的 Tm
   const tm1M = ((dh * 1000) / (ds + R * Math.log(k))) - 273.15;
-  
-  // Owczarzy (2004) 盐校正公式: 1/Tm(Na) = 1/Tm(1M) + (4.29*fGC - 3.95)*1e-5*ln(Na_eq) + 9.4e-6*(ln(Na_eq)^2)
+  const invTm1M = 1 / (tm1M + 273.15);
+
+  // 3. 盐浓度校正 (Owczarzy 2008 镁离子/单价离子模型)
+  const monovalent = settings.naConc / 1000; 
+  const mg = settings.mgConc / 1000; 
+  const dntp = settings.dntpConc / 1000; 
+  const freeMg = Math.max(0.0000001, mg - dntp); 
   const gcCount = (seq.match(/[gc]/g) || []).length;
   const fGC = gcCount / n;
-  
-  const invTm1M = 1 / (tm1M + 273.15);
-  const lnNa = Math.log(naEq);
-  const invTmSalt = invTm1M + (4.29 * fGC - 3.95) * 1e-5 * lnNa + 9.4e-6 * Math.pow(lnNa, 2);
-  
+  let invTmSalt = invTm1M;
+
+  if (freeMg === 0.0000001 || monovalent > freeMg * 100) {
+    const lnNa = Math.log(monovalent);
+    invTmSalt = invTm1M + (4.29 * fGC - 3.95) * 1e-5 * lnNa + 9.4e-6 * Math.pow(lnNa, 2);
+  } else {
+    const R_val = Math.sqrt(freeMg) / monovalent;
+    const lnMg = Math.log(freeMg);
+    if (R_val < 0.22) {
+      const lnNa = Math.log(monovalent);
+      invTmSalt = invTm1M + (4.29 * fGC - 3.95) * 1e-5 * lnNa + 9.4e-6 * Math.pow(lnNa, 2);
+    } else {
+      const a = 3.92e-5, b = -9.11e-6, c = 6.26e-5, d = 1.42e-5, e = -4.82e-4, f = 5.25e-4, g = 8.31e-5;
+      invTmSalt = invTm1M + a + b * lnMg + fGC * (c + d * lnMg) + 
+                  (1 / (2 * (n - 1))) * (e + f * lnMg + g * Math.pow(lnMg, 2));
+    }
+  }
+
   let tm = (1 / invTmSalt) - 273.15;
 
-  // 5. 计算 ΔG (at 37C)
-  let dg = dh - (T_std * ds / 1000);
-  
-  // 修正 LNA 影响
-  if (lnaCount > 0) {
-    tm += lnaCount * 5.0;
-    dg -= lnaCount * 1.5;
+  // 4. LNA 碱基及长度依赖性修正
+  // LNA 的贡献随着引物长度增加而急剧下降（稀释效应）
+  if (lnaPositions.length > 0) {
+    // 使用幂律模型拟合 IDT 结果：在 27nt 时，单个 LNA-G 的增量约 1.0°C
+    const lnaBaseIncrement = 3.3 * Math.pow(12 / n, 1.5); 
+    
+    lnaPositions.forEach(pos => {
+      const base = seq[pos];
+      // C/G LNA 通常比 A/T LNA 提供更多稳定性
+      const weight = (base === 'g' || base === 'c') ? 1.12 : 0.88;
+      tm += lnaBaseIncrement * weight;
+    });
   }
 
-  // 修正 MGB 影响
+  // 5. MGB 序列相关性模型 (Kutyavin et al. 2000)
+  // MGB 对 AT 富集序列的小沟结合更紧密，因此贡献更高
   if (isMGB) {
-    tm += 15.0;
-    dg -= 4.0;
+    // 经验公式：ΔTm_mgb ≈ 19.5 - 0.12 * GC%
+    const mgbBoost = 19.5 - (0.12 * (fGC * 100));
+    tm += mgbBoost;
   }
 
-  const gc = fGC * 100;
+  const dg = dh - (T_std * ds / 1000);
+  const gc = (gcCount / n) * 100;
 
   return { tm, dg, gc };
 };
@@ -159,19 +174,14 @@ export const findMostStableDimer = (s1: string, s2: string): StructureAnalysis |
   const q1 = s1.toUpperCase();
   const q2 = s2.toUpperCase();
   const q2Rev = q2.split('').reverse().join(''); 
-  
   let bestDG = 0;
   let bestResult: StructureAnalysis | null = null;
-
   for (let shift = -q2.length + 1; shift < q1.length; shift++) {
     let matches = 0;
     let currentDG = 0;
-    
     const overlapStart = Math.max(0, shift);
     const overlapEnd = Math.min(q1.length, shift + q2.length);
-    
     if (overlapEnd <= overlapStart) continue;
-
     const matchChars: string[] = [];
     for (let i = overlapStart; i < overlapEnd; i++) {
       const b1 = q1[i];
@@ -185,7 +195,6 @@ export const findMostStableDimer = (s1: string, s2: string): StructureAnalysis |
         currentDG += 0.4;
       }
     }
-
     if (matches >= 2 && currentDG < bestDG) {
       bestDG = currentDG;
       const indent1 = shift < 0 ? Math.abs(shift) : 0;
