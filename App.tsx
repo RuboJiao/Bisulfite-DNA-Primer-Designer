@@ -1,35 +1,92 @@
 
-import React, { useState, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Header } from './components/Header';
 import { DNAViewer } from './components/DNAViewer';
 import { PrimerDialog } from './components/PrimerDialog';
-import { ProjectData, SelectionState, Primer, StrandType } from './types';
-import { parseGenBank, calculateTm, getStrandSequence } from './services/dnaUtils';
+import { ProjectData, SelectionState, Primer, StrandType, SearchResult } from './types';
+import { parseGenBank, calculateTm, getStrandSequence, searchSequence } from './services/dnaUtils';
+
+const STRANDS_ORDER = [
+  StrandType.OT,
+  StrandType.CTOT,
+  StrandType.F,
+  StrandType.R,
+  StrandType.CTOB,
+  StrandType.OB,
+];
 
 const App: React.FC = () => {
   const [data, setData] = useState<ProjectData>({
     sequence: '',
-    methylationIndices: [],
+    methylatedF: [],
+    methylatedR: [],
     primers: [],
   });
 
   const [selection, setSelection] = useState<SelectionState | null>(null);
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [showPrimerDialog, setShowPrimerDialog] = useState(false);
   const [editingPrimer, setEditingPrimer] = useState<Primer | null>(null);
+  const [copyFeedback, setCopyFeedback] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Calculates the 5'->3' biological sequence of the current selection or editing primer
   const selectedSequence = useMemo(() => {
-    if (editingPrimer) return editingPrimer.sequence;
+    // If editing a primer, convert its stored visual sequence to biological 5'->3' if needed
+    if (editingPrimer) {
+      const isReverse = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(editingPrimer.strand);
+      return isReverse ? editingPrimer.sequence.split('').reverse().join('') : editingPrimer.sequence;
+    }
+
+    // If selecting from the viewer
     if (!selection || !data.sequence) return '';
     const min = Math.min(selection.start, selection.end);
     const max = Math.max(selection.start, selection.end);
-    const strandSeq = getStrandSequence(data.sequence, data.methylationIndices, selection.strand);
-    return strandSeq.slice(min, max + 1);
+    const strandSeq = getStrandSequence(data.sequence, data.methylatedF, data.methylatedR, selection.strand);
+    const rawSlice = strandSeq.slice(min, max + 1);
+
+    // If reverse strand (displayed 3'->5'), reverse string to get biological 5'->3'
+    const isReverse = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(selection.strand);
+    return isReverse ? rawSlice.split('').reverse().join('') : rawSlice;
   }, [selection, data, editingPrimer]);
 
   const currentTm = useMemo(() => {
     return calculateTm(selectedSequence);
   }, [selectedSequence]);
+
+  // Handle Ctrl+C / Cmd+C to copy selected sequence
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'C')) {
+        const activeTag = document.activeElement?.tagName.toLowerCase();
+        // Ignore if user is typing in an input
+        if (activeTag === 'input' || activeTag === 'textarea' || (document.activeElement as HTMLElement).isContentEditable) {
+          return;
+        }
+
+        if (selectedSequence && !showPrimerDialog) {
+          e.preventDefault();
+          try {
+            await navigator.clipboard.writeText(selectedSequence);
+            setCopyFeedback(true);
+          } catch (err) {
+            console.error('Failed to copy to clipboard', err);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedSequence, showPrimerDialog]);
+
+  // Clear feedback after 2s
+  useEffect(() => {
+    if (copyFeedback) {
+      const timer = setTimeout(() => setCopyFeedback(false), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [copyFeedback]);
 
   const handleSave = useCallback(() => {
     if (!data.sequence) return;
@@ -57,8 +114,17 @@ const App: React.FC = () => {
     if (file.name.endsWith('.methdna')) {
       try {
         const loaded = JSON.parse(text);
+        if (loaded.methylationIndices && !loaded.methylatedF) {
+          loaded.methylatedF = loaded.methylationIndices;
+          loaded.methylatedR = [];
+          delete loaded.methylationIndices;
+        }
+        if (!loaded.methylatedF) loaded.methylatedF = [];
+        if (!loaded.methylatedR) loaded.methylatedR = [];
+
         setData(loaded);
         setSelection(null);
+        setSearchResults([]);
         return;
       } catch (e) {
         alert("文件读取失败，请确保文件是有效的 .methdna 格式。");
@@ -73,12 +139,38 @@ const App: React.FC = () => {
 
     setData({
       sequence: seq,
-      methylationIndices: [],
+      methylatedF: [],
+      methylatedR: [],
       primers: []
     });
     setSelection(null);
+    setSearchResults([]);
     if (e.target) e.target.value = ''; 
   }, [data, handleSave]);
+
+  const handleSearch = useCallback((query: string, mismatches: number) => {
+    if (!data.sequence || !query) {
+      setSearchResults([]);
+      return;
+    }
+
+    const allResults: SearchResult[] = [];
+    STRANDS_ORDER.forEach(strandType => {
+      const seq = getStrandSequence(data.sequence, data.methylatedF, data.methylatedR, strandType);
+      const hits = searchSequence(seq, query, strandType, mismatches);
+      hits.forEach(hit => {
+        allResults.push({
+          strand: strandType,
+          ...hit
+        });
+      });
+    });
+
+    setSearchResults(allResults);
+    if (allResults.length === 0) {
+      alert("在 6 条链中均未发现匹配序列。");
+    }
+  }, [data]);
 
   const triggerImport = () => {
     fileInputRef.current?.click();
@@ -88,32 +180,42 @@ const App: React.FC = () => {
     if (!selection) return;
     const min = Math.min(selection.start, selection.end);
     const max = Math.max(selection.start, selection.end);
+    const isBottomStrand = [StrandType.R, StrandType.OB, StrandType.CTOT].includes(selection.strand);
+    const targetKey = isBottomStrand ? 'methylatedR' : 'methylatedF';
     
     setData(prev => {
-      const newIndices = [...prev.methylationIndices];
+      const newIndices = [...prev[targetKey]];
+      const fullStrandSeq = getStrandSequence(prev.sequence, prev.methylatedF, prev.methylatedR, selection.strand);
       for (let i = min; i <= max; i++) {
-        const base = prev.sequence[i].toLowerCase();
+        const base = fullStrandSeq[i].toLowerCase();
         if (base === 'c') {
           const index = newIndices.indexOf(i);
           if (index > -1) newIndices.splice(index, 1);
           else newIndices.push(i);
         }
       }
-      return { ...prev, methylationIndices: newIndices };
+      return { ...prev, [targetKey]: newIndices };
     });
   }, [selection]);
 
   const handleAddOrUpdatePrimer = useCallback((primerData: Omit<Primer, 'id'>) => {
+    // primerData.sequence comes from PrimerDialog, so it is biological 5'->3'.
+    // We must convert it to visual order (matching the strand display) before storage.
+    const isReverse = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(primerData.strand);
+    const visualSequence = isReverse ? primerData.sequence.split('').reverse().join('') : primerData.sequence;
+    
+    const finalPrimerData = { ...primerData, sequence: visualSequence };
+
     setData(prev => {
       if (editingPrimer) {
         return {
           ...prev,
-          primers: prev.primers.map(p => p.id === editingPrimer.id ? { ...primerData, id: p.id } : p)
+          primers: prev.primers.map(p => p.id === editingPrimer.id ? { ...finalPrimerData, id: p.id } : p)
         };
       }
       return {
         ...prev,
-        primers: [...prev.primers, { ...primerData, id: crypto.randomUUID() }]
+        primers: [...prev.primers, { ...finalPrimerData, id: crypto.randomUUID() }]
       };
     });
     setShowPrimerDialog(false);
@@ -139,6 +241,7 @@ const App: React.FC = () => {
           setShowPrimerDialog(true);
         }}
         onSave={handleSave}
+        onSearch={handleSearch}
         canMark={!!selection}
         canAddPrimer={!!selection}
         hasSequence={!!data.sequence}
@@ -156,9 +259,11 @@ const App: React.FC = () => {
         <main className="flex-1 flex flex-col relative overflow-hidden">
           <DNAViewer 
             sequence={data.sequence}
-            methylatedIndices={data.methylationIndices}
+            methylatedF={data.methylatedF}
+            methylatedR={data.methylatedR}
             primers={data.primers}
             selection={selection}
+            searchResults={searchResults}
             onSelectionChange={setSelection}
             onEditPrimer={(p) => {
               setEditingPrimer(p);
@@ -184,6 +289,20 @@ const App: React.FC = () => {
               </div>
             </div>
           )}
+          
+          {/* Copy Feedback Toast */}
+          {copyFeedback && (
+            <div className="absolute top-20 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-5 py-2.5 rounded-full shadow-xl flex items-center gap-2 animate-in fade-in slide-in-from-top-4 duration-200 z-[60]">
+               <svg className="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M5 13l4 4L19 7" /></svg>
+               <span className="text-xs font-bold tracking-wide">序列已复制到剪贴板</span>
+            </div>
+          )}
+          
+          {searchResults.length > 0 && (
+            <div className="absolute top-4 right-8 bg-amber-500 text-white px-4 py-2 rounded-full shadow-lg text-[10px] font-black uppercase tracking-widest animate-bounce">
+              匹配命中: {searchResults.length} 处
+            </div>
+          )}
         </main>
       ) : (
         <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50">
@@ -198,7 +317,7 @@ const App: React.FC = () => {
             </div>
             <h2 className="text-4xl font-black text-slate-800 mb-4 tracking-tight">导入序列开始设计</h2>
             <p className="max-w-lg text-slate-500 font-medium leading-relaxed text-lg text-pretty">
-              点击图标或上方“导入序列”按钮载入您的 DNA 文件。支持 .gb, .fa 格式以及之前的 .methdna 任务。
+              支持模糊搜索与多链比对。输入序列并在 6 条链中实时检索。
             </p>
           </button>
         </div>
@@ -206,11 +325,12 @@ const App: React.FC = () => {
 
       {showPrimerDialog && (editingPrimer || selection) && (
         <PrimerDialog 
-          initialSequence={editingPrimer ? editingPrimer.sequence : selectedSequence}
+          initialSequence={selectedSequence}
           strand={editingPrimer ? editingPrimer.strand : selection!.strand}
           start={editingPrimer ? editingPrimer.start : Math.min(selection!.start, selection!.end)}
           primerId={editingPrimer?.id}
           initialName={editingPrimer?.name}
+          existingPrimers={data.primers}
           onConfirm={handleAddOrUpdatePrimer}
           onDelete={handleDeletePrimer}
           onCancel={() => {

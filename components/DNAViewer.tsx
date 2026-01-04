@@ -1,13 +1,15 @@
 
 import React, { useRef, useMemo, useState, useEffect } from 'react';
-import { StrandType, Primer, SelectionState } from '../types';
-import { getStrandSequence } from '../services/dnaUtils';
+import { StrandType, Primer, SelectionState, SearchResult } from '../types';
+import { getStrandSequence, isBaseCompatible } from '../services/dnaUtils';
 
 interface DNAViewerProps {
   sequence: string;
-  methylatedIndices: number[];
+  methylatedF: number[];
+  methylatedR: number[];
   primers: Primer[];
   selection: SelectionState | null;
+  searchResults: SearchResult[];
   onSelectionChange: React.Dispatch<React.SetStateAction<SelectionState | null>>;
   onEditPrimer: (primer: Primer) => void;
 }
@@ -39,25 +41,26 @@ const PRIMER_THEMES: Record<StrandType, string> = {
   [StrandType.CTOB]: 'border-orange-500 bg-white text-orange-600',
 };
 
-// 极致紧凑型尺寸定义
-const BASE_WIDTH_PX = 9.5; // 进一步缩小碱基宽度，减少字符间距
-const BASE_HEIGHT_PX = 20; // 保持行高
+const BASE_WIDTH_PX = 9.5;
+const BASE_HEIGHT_PX = 20;
 
 export const DNAViewer: React.FC<DNAViewerProps> = ({
   sequence,
-  methylatedIndices,
+  methylatedF,
+  methylatedR,
   primers,
   selection,
+  searchResults,
   onSelectionChange,
   onEditPrimer,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
-  const [basesPerLine, setBasesPerLine] = useState(100); // 增加默认每行显示的碱基数
+  const [basesPerLine, setBasesPerLine] = useState(100);
 
   useEffect(() => {
     const updateWidth = () => {
       if (containerRef.current) {
-        const width = containerRef.current.clientWidth - 200;
+        const width = containerRef.current.clientWidth - 134;
         const calculated = Math.floor(width / BASE_WIDTH_PX);
         setBasesPerLine(Math.max(20, calculated));
       }
@@ -71,10 +74,10 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
   const strandSequences = useMemo(() => {
     const map: Record<StrandType, string> = {} as any;
     STRANDS_ORDER.forEach(type => {
-      map[type] = getStrandSequence(sequence, methylatedIndices, type);
+      map[type] = getStrandSequence(sequence, methylatedF, methylatedR, type);
     });
     return map;
-  }, [sequence, methylatedIndices]);
+  }, [sequence, methylatedF, methylatedR]);
 
   const handleMouseDown = (strand: StrandType, index: number) => {
     onSelectionChange({ strand, start: index, end: index });
@@ -117,7 +120,7 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
         style={{ 
           left: `${startIndexInBlock * BASE_WIDTH_PX - 2}px`, 
           width: `${widthInBases * BASE_WIDTH_PX + 4}px`,
-          top: '-19px', // 缩小引物与模板之间的间距 (从 -22px 调整为 -19px)
+          top: '-19px',
           height: '18px'
         }}
         onClick={(e) => {
@@ -150,12 +153,25 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
             {primer.sequence.split('').slice(pStart - primer.start, pEnd - primer.start + 1).map((b, i) => {
               const globalIdx = pStart + i;
               const templateBase = strandSeq[globalIdx];
-              const isMatch = b.toLowerCase() === templateBase.toLowerCase();
+              const isCompatible = isBaseCompatible(b, templateBase);
+              const isDegenerate = !['A', 'T', 'C', 'G'].includes(b.toUpperCase());
+              
+              // 规则更新：
+              // 1. 不兼容 -> 红色背景
+              // 2. 兼容且是简并碱基 -> 绿色背景 (emerald-500)
+              // 3. 兼容且是普通碱基 -> 不显示高亮 (不高亮即维持引物白色背景)
+              let highlightClass = '';
+              if (!isCompatible) {
+                highlightClass = 'bg-rose-500 text-white';
+              } else if (isDegenerate) {
+                highlightClass = 'bg-emerald-500 text-white';
+              }
+              
               return (
                 <div 
                   key={i} 
                   style={{ width: `${BASE_WIDTH_PX}px` }} 
-                  className={`text-center shrink-0 h-full flex items-center justify-center ${isMatch ? '' : 'bg-red-500 text-white'}`}
+                  className={`text-center shrink-0 h-full flex items-center justify-center ${highlightClass}`}
                 >
                   {b.toUpperCase()}
                 </div>
@@ -171,15 +187,35 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
     );
   };
 
+  const renderSearchHighlight = (res: SearchResult, blockStart: number, blockEnd: number) => {
+    const sStart = Math.max(res.start, blockStart);
+    const sEnd = Math.min(res.end, blockEnd);
+    if (sStart > sEnd) return null;
+
+    const startIdx = sStart - blockStart;
+    const width = sEnd - sStart + 1;
+
+    return (
+      <div 
+        key={`${res.strand}-${res.start}`}
+        className="absolute h-[24px] top-[-2px] z-20 border-2 border-amber-400 bg-amber-400/10 rounded-lg pointer-events-none shadow-[0_0_10px_rgba(251,191,36,0.4)] animate-pulse"
+        style={{ 
+          left: `${startIdx * BASE_WIDTH_PX - 2}px`, 
+          width: `${width * BASE_WIDTH_PX + 4}px` 
+        }}
+      />
+    );
+  };
+
   const blocks = [];
   for (let i = 0; i < sequence.length; i += basesPerLine) {
     blocks.push({ start: i, end: Math.min(i + basesPerLine - 1, sequence.length - 1) });
   }
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto p-6 space-y-16 bg-white select-none dna-font">
+    <div ref={containerRef} className="flex-1 overflow-y-auto px-6 py-9 space-y-16 bg-white select-none dna-font">
       {blocks.map((block) => (
-        <div key={block.start} className="relative pl-24 pr-8">
+        <div key={block.start} className="relative pl-6 pr-12">
           <div className="absolute left-1 top-0 text-[10px] font-bold text-slate-300">
             {block.start + 1}
           </div>
@@ -188,48 +224,59 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
           </div>
 
           <div className="flex flex-col gap-9">
-            {STRANDS_ORDER.map((type) => (
-              <div key={type} className="relative flex items-center" style={{ height: `${BASE_HEIGHT_PX}px` }}>
-                <div className={`w-24 shrink-0 flex flex-col items-end pr-6 ${COLORS[type]}`}>
-                  <span className="text-[10px] font-black tracking-tighter leading-none">{type}</span>
-                  <span className="text-[8px] opacity-60 font-bold leading-tight">
-                    {[StrandType.F, StrandType.OT, StrandType.CTOB].includes(type) ? "5'-3'" : "3'-5'"}
-                  </span>
-                </div>
-                
-                <div className={`flex relative border-b border-slate-100 ${COLORS[type]} text-[14px] leading-none h-full items-center`}>
-                  {strandSequences[type]
-                    .slice(block.start, block.end + 1)
-                    .split('')
-                    .map((base, idx) => {
-                      const globalIdx = block.start + idx;
-                      const isMethylated = methylatedIndices.includes(globalIdx);
-                      const displayBase = (base.toLowerCase() === 'c' && isMethylated) ? 'C' : base.toLowerCase();
-                      const active = isSelected(globalIdx);
-                      
-                      return (
-                        <div
-                          key={globalIdx}
-                          data-idx={globalIdx}
-                          onMouseDown={() => handleMouseDown(type, globalIdx)}
-                          style={{ width: `${BASE_WIDTH_PX}px` }}
-                          className={`text-center cursor-pointer transition-colors shrink-0 h-full flex items-center justify-center
-                            ${active ? 'bg-yellow-200 text-black outline outline-1 outline-yellow-400 z-30' : ''} 
-                            ${isMethylated && base.toLowerCase() === 'c' ? 'font-bold text-red-600' : ''}`}
-                        >
-                          {displayBase}
-                        </div>
-                      );
-                    })}
-                </div>
+            {STRANDS_ORDER.map((type) => {
+              const isBottomStrand = [StrandType.R, StrandType.OB, StrandType.CTOB].includes(type);
+              const activeMethylList = isBottomStrand ? methylatedR : methylatedF;
+              
+              return (
+                <div key={type} className="relative flex items-center" style={{ height: `${BASE_HEIGHT_PX}px` }}>
+                  <div className={`w-12 shrink-0 flex flex-col items-end pr-2 ${COLORS[type]}`}>
+                    <span className="text-[10px] font-black tracking-tighter leading-none">{type}</span>
+                    <span className="text-[8px] opacity-60 font-bold leading-tight">
+                      {[StrandType.F, StrandType.OT, StrandType.CTOB].includes(type) ? "5'-3'" : "3'-5'"}
+                    </span>
+                  </div>
+                  
+                  <div className={`flex relative border-b border-slate-100 ${COLORS[type]} text-[14px] leading-none h-full items-center`}>
+                    {strandSequences[type]
+                      .slice(block.start, block.end + 1)
+                      .split('')
+                      .map((base, idx) => {
+                        const globalIdx = block.start + idx;
+                        const isC = base.toLowerCase() === 'c';
+                        const isMethylated = activeMethylList.includes(globalIdx) && isC;
+                        const active = isSelected(globalIdx);
+                        
+                        const displayChar = isMethylated ? 'C' : base;
+                        
+                        return (
+                          <div
+                            key={globalIdx}
+                            data-idx={globalIdx}
+                            onMouseDown={() => handleMouseDown(type, globalIdx)}
+                            style={{ width: `${BASE_WIDTH_PX}px` }}
+                            className={`text-center cursor-pointer transition-colors shrink-0 h-full flex items-center justify-center
+                              ${active ? 'bg-yellow-200 text-black outline outline-1 outline-yellow-400 z-30' : ''} 
+                              ${isMethylated ? 'font-black text-red-600' : ''}`}
+                          >
+                            {displayChar}
+                          </div>
+                        );
+                      })}
 
-                <div className="absolute left-24 top-0 w-full h-full pointer-events-none">
-                  {primers
-                    .filter(p => p.strand === type)
-                    .map(p => renderPrimer(p, block.start, block.end))}
+                    {searchResults
+                      .filter(r => r.strand === type)
+                      .map(r => renderSearchHighlight(r, block.start, block.end))}
+                  </div>
+
+                  <div className="absolute left-12 top-0 w-full h-full pointer-events-none">
+                    {primers
+                      .filter(p => p.strand === type)
+                      .map(p => renderPrimer(p, block.start, block.end))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       ))}

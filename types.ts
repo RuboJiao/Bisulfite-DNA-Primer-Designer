@@ -23,8 +23,17 @@ export interface SelectionState {
   end: number;
 }
 
+export interface SearchResult {
+  strand: StrandType;
+  start: number;
+  end: number;
+  mismatches: number;
+}
+
 export interface ProjectData {
   sequence: string;
-  methylationIndices: number[]; // indices of 'c' that are methylated
+  methylatedF: number[]; 
+  methylatedR: number[]; 
   primers: Primer[];
+  methylationIndices?: number[];
 }
