@@ -158,10 +158,10 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
           </div>
         </div>
 
-        {/* 5'-3' 同向对齐视图 */}
-        <div className="px-6 py-4 bg-white border-b border-slate-100">
-           <div className="relative bg-slate-50 rounded-2xl p-6 border border-slate-100 shadow-inner overflow-x-auto min-h-[140px]">
-              <div className="dna-font text-[14px] leading-none whitespace-pre flex flex-col gap-1 min-w-max">
+        {/* 5'-3' 同向对齐视图 - 蓝框：高度缩小为 2/3 (min-h 140 -> 95)，内容靠下 */}
+        <div className="px-6 py-1 bg-white border-b border-slate-100">
+           <div className="relative bg-slate-50 rounded-2xl p-4 border border-slate-100 shadow-inner overflow-x-auto min-h-[95px] flex flex-col justify-end">
+              <div className="dna-font text-[14px] leading-none whitespace-pre flex flex-col gap-1 min-w-max pb-1">
                  
                  <div className="relative flex">
                     <span className="mr-4 text-[9px] font-black text-slate-300 tracking-widest uppercase self-center">5'</span>
@@ -222,15 +222,21 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
            </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+        {/* 序列编辑器 - 红框：高度缩小为 1/2 (min-h 70 -> 38)，文字垂直居中 (py-4 -> py-1.5) */}
+        <div className="flex-1 overflow-y-auto px-6 py-2 space-y-2">
           <div className="relative group">
             <div className="absolute -top-2.5 left-4 bg-white px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest z-10">编辑引物序列</div>
             <textarea 
               value={sequence}
               onChange={(e) => setSequence(e.target.value.replace(/[^a-zA-Z RYSWKMBDHVN\[\]]/g, ''))}
               placeholder="例如: [TTTTTT]ACCACCACCCAACACACAAT[CGT]AACAAACACA"
-              className="w-full px-4 py-4 border-2 border-slate-100 rounded-2xl dna-font text-lg focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all tracking-wider text-slate-800 font-bold bg-slate-50/50 shadow-inner resize-none min-h-[70px]"
+              className="w-full px-4 py-1.5 border-2 border-slate-100 rounded-2xl dna-font text-lg focus:ring-4 focus:ring-indigo-500/5 focus:border-indigo-500 outline-none transition-all tracking-wider text-slate-800 font-bold bg-slate-50/50 shadow-inner resize-none min-h-[38px] leading-snug"
             />
+          </div>
+          
+          {/* 添加提示文字 */}
+          <div className="px-1 text-[10px] text-slate-400 font-medium">
+            提示：兼容简并碱基，大写字母为LNA修饰，[]中的碱基定义为与模板不互补的额外碱基序列
           </div>
 
           <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm">
@@ -240,7 +246,6 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
                 { id: 'self', label: '自身二聚体', dg: selfDimer?.dg },
                 { id: 'cross', label: '交叉二聚体', dg: crossDimer?.dg }
               ].map(tab => {
-                // 将警戒阈值统一设定为 -2.0
                 const isRisky = tab.dg !== undefined && tab.dg < -2.0;
                 return (
                   <button 
