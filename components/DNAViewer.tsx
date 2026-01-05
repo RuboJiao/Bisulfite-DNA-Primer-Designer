@@ -32,17 +32,26 @@ const COLORS: Record<StrandType, string> = {
   [StrandType.CTOB]: 'text-orange-500',
 };
 
-const PRIMER_THEMES: Record<StrandType, string> = {
-  [StrandType.F]: 'border-blue-600 bg-white text-blue-700',
-  [StrandType.R]: 'border-blue-500 bg-white text-blue-600',
-  [StrandType.OT]: 'border-purple-600 bg-white text-purple-700',
-  [StrandType.CTOT]: 'border-purple-500 bg-white text-purple-600',
-  [StrandType.OB]: 'border-orange-600 bg-white text-orange-700',
-  [StrandType.CTOB]: 'border-orange-500 bg-white text-orange-600',
+const PRIMER_THEMES: Record<StrandType, { color: string, fill: string }> = {
+  [StrandType.F]: { color: '#1d4ed8', fill: '#eff6ff' },
+  [StrandType.R]: { color: '#3b82f6', fill: '#f0f9ff' },
+  [StrandType.OT]: { color: '#7e22ce', fill: '#faf5ff' },
+  [StrandType.CTOT]: { color: '#a855f7', fill: '#f5f3ff' },
+  [StrandType.OB]: { color: '#c2410c', fill: '#fff7ed' },
+  [StrandType.CTOB]: { color: '#f97316', fill: '#fffaf5' },
 };
 
 const BASE_WIDTH_PX = 9.5;
 const BASE_HEIGHT_PX = 20;
+
+// 辅助函数：反转带括号的序列（如 [TTT]atgc -> cgta[TTT]），用于反向链显示对齐
+const reverseSequenceWithBrackets = (s: string) => {
+  const parts = s.split(/(\[[^\]]*\])/g).filter(Boolean);
+  return parts.reverse().map(p => {
+    if (p.startsWith('[') && p.endsWith(']')) return p;
+    return p.split('').reverse().join('');
+  }).join('');
+};
 
 export const DNAViewer: React.FC<DNAViewerProps> = ({
   sequence,
@@ -104,81 +113,173 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
   };
 
   const renderPrimer = (primer: Primer, currentBlockStart: number, currentBlockEnd: number) => {
-    const pStart = Math.max(primer.start, currentBlockStart);
-    const pEnd = Math.min(primer.start + primer.length - 1, currentBlockEnd);
-    if (pStart > pEnd) return null;
-
-    const startIndexInBlock = pStart - currentBlockStart;
-    const widthInBases = pEnd - pStart + 1;
     const isForward = [StrandType.F, StrandType.OT, StrandType.CTOB].includes(primer.strand);
+    const displaySeq = isForward ? primer.sequence : reverseSequenceWithBrackets(primer.sequence);
+    
+    const parts = displaySeq.split(/(\[[^\]]*\])/g);
+    let currentBindIdx = primer.start;
+    
+    interface Unit { char: string; tIdx: number }
+    const bindingUnits: Unit[] = [];
+    const tails = new Map<number, string>(); 
+
+    parts.forEach(part => {
+      if (!part) return;
+      if (part.startsWith('[') && part.endsWith(']')) {
+        tails.set(bindingUnits.length, part.slice(1, -1));
+      } else {
+        for (const char of part) {
+          bindingUnits.push({ char, tIdx: currentBindIdx++ });
+        }
+      }
+    });
+
     const strandSeq = strandSequences[primer.strand];
+    const theme = PRIMER_THEMES[primer.strand];
+    const visibleBinding = bindingUnits.filter(u => u.tIdx >= currentBlockStart && u.tIdx <= currentBlockEnd);
+    if (visibleBinding.length === 0) return null;
+
+    const H_BIND = 16;
+    const OFFSET_TAIL = 16; 
+    const unitWidth = BASE_WIDTH_PX;
+    
+    // 计算边界
+    let minX = 0;
+    if (tails.has(0)) minX = -(tails.get(0)!.length * unitWidth);
+    
+    let maxX = bindingUnits.length * unitWidth;
+    if (tails.has(bindingUnits.length)) {
+      maxX += (tails.get(bindingUnits.length)!.length * unitWidth);
+    }
+
+    const points: {x: number, y: number}[] = [];
+    
+    // 1. 上边缘
+    if (tails.has(0)) {
+        points.push({ x: minX, y: 0 });
+        points.push({ x: minX, y: -OFFSET_TAIL });
+        points.push({ x: 0, y: -OFFSET_TAIL });
+    }
+    points.push({ x: 0, y: 0 });
+
+    for (let i = 1; i < bindingUnits.length; i++) {
+        if (tails.has(i)) {
+            const curX = i * unitWidth;
+            const tLen = tails.get(i)!.length * unitWidth;
+            points.push({ x: curX, y: 0 });
+            points.push({ x: curX, y: -OFFSET_TAIL });
+            points.push({ x: curX + tLen, y: -OFFSET_TAIL });
+            points.push({ x: curX + tLen, y: 0 });
+        }
+    }
+
+    const lastBindX = bindingUnits.length * unitWidth;
+    points.push({ x: lastBindX, y: 0 });
+    if (tails.has(bindingUnits.length)) {
+        points.push({ x: lastBindX, y: -OFFSET_TAIL });
+        points.push({ x: maxX, y: -OFFSET_TAIL });
+        points.push({ x: maxX, y: 0 });
+    }
+
+    // 2. 下边缘（包含 tail 提示点）
+    points.push({ x: maxX, y: H_BIND });
+    for (let i = bindingUnits.length; i >= 0; i--) {
+        if (tails.has(i)) {
+            const curX = i * unitWidth;
+            points.push({ x: curX + 1.5, y: H_BIND });
+            points.push({ x: curX, y: H_BIND - 3 }); 
+            points.push({ x: curX - 1.5, y: H_BIND });
+        }
+    }
+    points.push({ x: minX, y: H_BIND });
+    
+    const pathD = `M ${points[0].x} ${points[0].y} ` + points.slice(1).map(p => `L ${p.x} ${p.y}`).join(' ') + " Z";
 
     return (
       <div 
         key={primer.id}
-        className="absolute z-40 cursor-pointer pointer-events-auto transition-all"
+        className="absolute z-40"
         style={{ 
-          left: `${startIndexInBlock * BASE_WIDTH_PX - 2}px`, 
-          width: `${widthInBases * BASE_WIDTH_PX + 4}px`,
-          top: '-19px',
-          height: '18px'
-        }}
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelectionChange({ 
-            strand: primer.strand, 
-            start: primer.start, 
-            end: primer.start + primer.length - 1 
-          });
-        }}
-        onDoubleClick={(e) => {
-          e.stopPropagation();
-          onEditPrimer(primer);
+          left: `${(primer.start - currentBlockStart) * BASE_WIDTH_PX}px`,
+          top: `-18px`,
         }}
       >
-        <div className={`relative w-full h-full border-2 rounded-sm flex items-center box-border ${PRIMER_THEMES[primer.strand]} shadow-sm`}>
+        {/* SVG 背景框：坐标原点对应结合区起点 */}
+        <svg 
+          style={{ 
+            position: 'absolute', 
+            left: `${minX}px`, 
+            top: `${-OFFSET_TAIL}px`, 
+            overflow: 'visible' 
+          }}
+          width={maxX - minX} 
+          height={H_BIND + OFFSET_TAIL} 
+          viewBox={`${minX} ${-OFFSET_TAIL} ${maxX - minX} ${H_BIND + OFFSET_TAIL}`}
+          className="pointer-events-none"
+        >
+          <path d={pathD} fill={theme.fill} stroke={theme.color} strokeWidth="1.2" strokeLinejoin="round" />
+          
           {isForward ? (
-            <>
-              <div className="absolute -right-[8px] top-[-2px] bottom-[-2px] w-0 h-0 border-y-[9px] border-y-transparent border-l-[8px] border-l-current" />
-              <div className="absolute -right-[5px] top-[0px] bottom-[0px] w-0 h-0 border-y-[7px] border-y-transparent border-l-[6px] border-l-white z-10" />
-            </>
+            <path d={`M ${lastBindX} 0 L ${lastBindX + 7} ${H_BIND/2} L ${lastBindX} ${H_BIND} Z`} fill={theme.color} />
           ) : (
-            <>
-              <div className="absolute -left-[8px] top-[-2px] bottom-[-2px] w-0 h-0 border-y-[9px] border-y-transparent border-r-[8px] border-r-current" />
-              <div className="absolute -left-[5px] top-[0px] bottom-[0px] w-0 h-0 border-y-[7px] border-y-transparent border-r-[6px] border-r-white z-10" />
-            </>
+            <path d={`M 0 0 L -7 ${H_BIND/2} L 0 ${H_BIND} Z`} fill={theme.color} />
           )}
 
-          <div className="flex w-full dna-font text-[10px] font-bold leading-none h-full items-center overflow-hidden">
-            {primer.sequence.split('').slice(pStart - primer.start, pEnd - primer.start + 1).map((b, i) => {
-              const globalIdx = pStart + i;
-              const templateBase = strandSeq[globalIdx];
-              const isCompatible = isBaseCompatible(b, templateBase);
-              const isDegenerate = !['A', 'T', 'C', 'G', 'a', 't', 'c', 'g'].includes(b);
-              
-              let highlightClass = '';
-              if (!isCompatible) {
-                highlightClass = 'bg-rose-500 text-white';
-              } else if (isDegenerate) {
-                highlightClass = 'bg-emerald-500 text-white';
-              }
-              
-              return (
-                <div 
-                  key={i} 
-                  style={{ width: `${BASE_WIDTH_PX}px` }} 
-                  className={`text-center shrink-0 h-full flex items-center justify-center ${highlightClass}`}
-                >
-                  {/* 此处不再转换大写，显示原始大小写以区分修饰 */}
-                  {b}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="absolute left-1/2 -translate-x-1/2 -top-4 px-1 text-[8px] font-black uppercase rounded bg-white border border-current shadow-sm whitespace-nowrap z-50">
+          <text 
+            x={minX - 6} 
+            y={-OFFSET_TAIL + 8}
+            textAnchor="end"
+            className="font-black uppercase italic pointer-events-auto cursor-pointer select-none hover:underline"
+            style={{ fontSize: '8px', fill: theme.color, opacity: 0.8 }}
+            onClick={(e) => { e.stopPropagation(); onEditPrimer(primer); }}
+          >
             {primer.name}
-          </div>
+          </text>
+        </svg>
+
+        {/* 序列内容：结合区从 0 开始渲染 */}
+        <div className="relative dna-font text-[9px] leading-none pointer-events-none" style={{ height: `${H_BIND}px` }}>
+          {bindingUnits.map((u, idx) => {
+            if (u.tIdx < currentBlockStart || u.tIdx > currentBlockEnd) return null;
+            const isMatch = isBaseCompatible(u.char, strandSeq[u.tIdx] || '');
+            const isDegenerate = !['A', 'T', 'C', 'G', 'a', 't', 'c', 'g'].includes(u.char);
+            return (
+              <div 
+                key={idx} 
+                className="absolute flex items-center justify-center font-black pointer-events-auto cursor-pointer" 
+                onDoubleClick={(e) => { e.stopPropagation(); onEditPrimer(primer); }}
+                style={{ 
+                  left: `${idx * unitWidth}px`, 
+                  width: `${unitWidth}px`, 
+                  height: `${H_BIND}px`,
+                  color: isMatch && !isDegenerate ? theme.color : undefined
+                }}
+              >
+                <span className={!isMatch ? 'bg-rose-500 text-white rounded-[1px] px-[1px]' : isDegenerate ? 'bg-emerald-500 text-white rounded-[1px] px-[1px]' : ''}>
+                    {/[A-Z]/.test(u.char) ? u.char : u.char.toLowerCase()}
+                </span>
+              </div>
+            );
+          })}
+
+          {Array.from(tails.entries()).map(([bindIdx, content]) => (
+            <div 
+              key={`tail-${bindIdx}`} 
+              className="absolute flex pointer-events-auto cursor-pointer" 
+              onDoubleClick={(e) => { e.stopPropagation(); onEditPrimer(primer); }}
+              style={{ 
+                left: bindIdx === 0 ? `-${content.length * unitWidth}px` : `${bindIdx * unitWidth}px`, 
+                top: `-${OFFSET_TAIL}px`, 
+                height: `${H_BIND}px` 
+              }}
+            >
+              {content.split('').map((c, i) => (
+                <div key={i} style={{ width: `${unitWidth}px` }} className="flex items-center justify-center font-bold text-slate-400">
+                  {c.toLowerCase()}
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
     );
@@ -188,18 +289,13 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
     const sStart = Math.max(res.start, blockStart);
     const sEnd = Math.min(res.end, blockEnd);
     if (sStart > sEnd) return null;
-
     const startIdx = sStart - blockStart;
     const width = sEnd - sStart + 1;
-
     return (
       <div 
         key={`${res.strand}-${res.start}`}
         className="absolute h-[24px] top-[-2px] z-20 border-2 border-amber-400 bg-amber-400/10 rounded-lg pointer-events-none shadow-[0_0_10px_rgba(251,191,36,0.4)] animate-pulse"
-        style={{ 
-          left: `${startIdx * BASE_WIDTH_PX - 2}px`, 
-          width: `${width * BASE_WIDTH_PX + 4}px` 
-        }}
+        style={{ left: `${startIdx * BASE_WIDTH_PX - 2}px`, width: `${width * BASE_WIDTH_PX + 4}px` }}
       />
     );
   };
@@ -210,31 +306,34 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
   }
 
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto px-6 py-9 space-y-16 bg-white select-none dna-font">
+    <div ref={containerRef} className="flex-1 overflow-y-auto px-6 py-12 space-y-20 bg-white select-none dna-font">
       {blocks.map((block) => (
-        <div key={block.start} className="relative pl-6 pr-12">
-          <div className="absolute left-1 top-0 text-[10px] font-bold text-slate-300">
+        <div key={block.start} className="relative pl-12 pr-12">
+          <div className="absolute left-4 top-0 text-[10px] font-bold text-slate-300">
             {block.start + 1}
           </div>
           <div className="absolute right-0 top-0 text-[10px] font-bold text-slate-300">
             {block.end + 1}
           </div>
 
-          <div className="flex flex-col gap-9">
+          <div className="flex flex-col gap-[36px]">
             {STRANDS_ORDER.map((type) => {
-              const isBottomStrand = [StrandType.R, StrandType.OB, StrandType.CTOB].includes(type);
+              const isBottomStrand = [StrandType.R, StrandType.OB, StrandType.CTOT].includes(type);
               const activeMethylList = isBottomStrand ? methylatedR : methylatedF;
-              
               return (
                 <div key={type} className="relative flex items-center" style={{ height: `${BASE_HEIGHT_PX}px` }}>
-                  <div className={`w-12 shrink-0 flex flex-col items-end pr-2 ${COLORS[type]}`}>
+                  <div className={`w-12 shrink-0 flex flex-col items-end pr-3 ${COLORS[type]}`}>
                     <span className="text-[10px] font-black tracking-tighter leading-none">{type}</span>
-                    <span className="text-[8px] opacity-60 font-bold leading-tight">
+                    <span className="text-[8px] opacity-30 font-bold leading-tight uppercase">
                       {[StrandType.F, StrandType.OT, StrandType.CTOB].includes(type) ? "5'-3'" : "3'-5'"}
                     </span>
                   </div>
                   
-                  <div className={`flex relative border-b border-slate-100 ${COLORS[type]} text-[14px] leading-none h-full items-center`}>
+                  <div className="absolute left-12 top-0 w-full h-full pointer-events-none">
+                    {primers.filter(p => p.strand === type).map(p => renderPrimer(p, block.start, block.end))}
+                  </div>
+
+                  <div className={`flex relative border-b border-slate-100/50 ${COLORS[type]} text-[14px] leading-none h-full items-center z-10`}>
                     {strandSequences[type]
                       .slice(block.start, block.end + 1)
                       .split('')
@@ -243,9 +342,6 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
                         const isC = base.toLowerCase() === 'c';
                         const isMethylated = activeMethylList.includes(globalIdx) && isC;
                         const active = isSelected(globalIdx);
-                        
-                        const displayChar = isMethylated ? 'C' : base;
-                        
                         return (
                           <div
                             key={globalIdx}
@@ -256,20 +352,11 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
                               ${active ? 'bg-yellow-200 text-black outline outline-1 outline-yellow-400 z-30' : ''} 
                               ${isMethylated ? 'font-black text-red-600' : ''}`}
                           >
-                            {displayChar}
+                            {isMethylated ? 'C' : base}
                           </div>
                         );
                       })}
-
-                    {searchResults
-                      .filter(r => r.strand === type)
-                      .map(r => renderSearchHighlight(r, block.start, block.end))}
-                  </div>
-
-                  <div className="absolute left-12 top-0 w-full h-full pointer-events-none">
-                    {primers
-                      .filter(p => p.strand === type)
-                      .map(p => renderPrimer(p, block.start, block.end))}
+                    {searchResults.filter(r => r.strand === type).map(r => renderSearchHighlight(r, block.start, block.end))}
                   </div>
                 </div>
               );

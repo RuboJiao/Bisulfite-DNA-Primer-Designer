@@ -1,4 +1,3 @@
-
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Header } from './components/Header';
 import { DNAViewer } from './components/DNAViewer';
@@ -31,30 +30,47 @@ const App: React.FC = () => {
   const [showPrimerDialog, setShowPrimerDialog] = useState(false);
   const [editingPrimer, setEditingPrimer] = useState<Primer | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [pastedSequence, setPastedSequence] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Calculates the 5'->3' biological sequence
   const selectedSequence = useMemo(() => {
     if (editingPrimer) {
-      const isReverse = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(editingPrimer.strand);
-      return isReverse ? editingPrimer.sequence.split('').reverse().join('') : editingPrimer.sequence;
+      return editingPrimer.sequence;
     }
 
     if (!selection || !data.sequence) return '';
     const min = Math.min(selection.start, selection.end);
     const max = Math.max(selection.start, selection.end);
     const strandSeq = getStrandSequence(data.sequence, data.methylatedF, data.methylatedR, selection.strand);
+    let seq = strandSeq.slice(min, max + 1).toLowerCase();
     
-    // 默认提取出的序列为小写（无修饰）
-    const rawSlice = strandSeq.slice(min, max + 1).toLowerCase();
-
-    const isReverse = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(selection.strand);
-    return isReverse ? rawSlice.split('').reverse().join('') : rawSlice;
+    // 物理反向链识别：R, CTOT, OB 在屏幕上是 3' -> 5'
+    // 选中后必须反转以提供生物学标准的 5' -> 3' 序列
+    const isReversePhysical = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(selection.strand);
+    if (isReversePhysical) {
+      seq = seq.split('').reverse().join('');
+    }
+    return seq;
   }, [selection, data, editingPrimer]);
 
+  const currentTemplate = useMemo(() => {
+    if (!selection || !data.sequence) return '';
+    const min = Math.min(selection.start, selection.end);
+    const max = Math.max(selection.start, selection.end);
+    const strandSeq = getStrandSequence(data.sequence, data.methylatedF, data.methylatedR, selection.strand);
+    let seq = strandSeq.slice(min, max + 1).toLowerCase();
+    
+    // 模板序列同步反转，确保与 5'-3' 的引物进行正确的配对计算
+    const isReversePhysical = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(selection.strand);
+    if (isReversePhysical) {
+      seq = seq.split('').reverse().join('');
+    }
+    return seq;
+  }, [selection, data]);
+
   const currentStats = useMemo(() => {
-    return calculateThermodynamics(selectedSequence, editingPrimer?.isMGB, thermoSettings);
-  }, [selectedSequence, editingPrimer, thermoSettings]);
+    return calculateThermodynamics(selectedSequence, currentTemplate, editingPrimer?.isMGB, thermoSettings);
+  }, [selectedSequence, currentTemplate, editingPrimer, thermoSettings]);
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
@@ -66,7 +82,7 @@ const App: React.FC = () => {
         if (selectedSequence && !showPrimerDialog) {
           e.preventDefault();
           try {
-            await navigator.clipboard.writeText(selectedSequence);
+            await navigator.clipboard.writeText(selectedSequence.replace(/[\[\]]/g, ''));
             setCopyFeedback(true);
           } catch (err) {
             console.error('Failed to copy to clipboard', err);
@@ -134,6 +150,17 @@ const App: React.FC = () => {
     if (e.target) e.target.value = ''; 
   }, [data, handleSave]);
 
+  const handlePasteImport = () => {
+    const cleanSeq = pastedSequence.replace(/[^atcgATCG]/g, '').toLowerCase();
+    if (cleanSeq.length < 10) {
+      alert("请输入有效的 DNA 序列（至少 10bp）。");
+      return;
+    }
+    setData({ sequence: cleanSeq, methylatedF: [], methylatedR: [], primers: [] });
+    setSelection(null);
+    setSearchResults([]);
+  };
+
   const handleSearch = useCallback((query: string, mismatches: number) => {
     if (!data.sequence || !query) {
       setSearchResults([]);
@@ -173,19 +200,16 @@ const App: React.FC = () => {
   }, [selection]);
 
   const handleAddOrUpdatePrimer = useCallback((primerData: Omit<Primer, 'id'>) => {
-    const isReverse = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(primerData.strand);
-    const visualSequence = isReverse ? primerData.sequence.split('').reverse().join('') : primerData.sequence;
-    const finalPrimerData = { ...primerData, sequence: visualSequence };
     setData(prev => {
       if (editingPrimer) {
         return {
           ...prev,
-          primers: prev.primers.map(p => p.id === editingPrimer.id ? { ...finalPrimerData, id: p.id } : p)
+          primers: prev.primers.map(p => p.id === editingPrimer.id ? { ...primerData, id: p.id } : p)
         };
       }
       return {
         ...prev,
-        primers: [...prev.primers, { ...finalPrimerData, id: crypto.randomUUID() }]
+        primers: [...prev.primers, { ...primerData, id: crypto.randomUUID() }]
       };
     });
     setShowPrimerDialog(false);
@@ -245,7 +269,7 @@ const App: React.FC = () => {
               <div className="w-px h-10 bg-white/20" />
               <div className="flex flex-col">
                 <span className="text-[10px] text-white/50 font-black tracking-widest">Bases</span>
-                <span className="text-2xl font-black font-mono">{selectedSequence.length}<span className="text-sm"> bp</span></span>
+                <span className="text-2xl font-black font-mono">{selectedSequence.replace(/[\[\]]/g, '').length}<span className="text-sm"> bp</span></span>
               </div>
               <div className="w-px h-10 bg-white/20" />
               <div className="flex flex-col">
@@ -263,15 +287,49 @@ const App: React.FC = () => {
           )}
         </main>
       ) : (
-        <div className="flex-1 flex flex-col items-center justify-center p-12 text-center bg-slate-50">
-          <button onClick={() => fileInputRef.current?.click()} className="group flex flex-col items-center outline-none">
-            <div className="w-40 h-40 bg-white rounded-[3rem] shadow-2xl flex items-center justify-center mb-8 border border-slate-100 transition-all duration-300 group-hover:scale-105 group-hover:shadow-blue-200 group-active:scale-95">
-               <svg className="w-20 h-20 text-blue-500 animate-pulse group-hover:text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-               </svg>
+        <div className="flex-1 flex flex-col items-center justify-center p-8 bg-slate-50 overflow-y-auto">
+          <div className="max-w-6xl w-full grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+            <div className="flex flex-col items-center text-center p-8 bg-white rounded-[3rem] shadow-xl border border-slate-100 hover:shadow-2xl transition-all duration-300">
+              <button onClick={() => fileInputRef.current?.click()} className="group flex flex-col items-center outline-none">
+                <div className="w-32 h-32 bg-blue-50 rounded-3xl flex items-center justify-center mb-6 transition-all duration-300 group-hover:scale-105 group-hover:bg-blue-100 group-active:scale-95">
+                   <svg className="w-16 h-16 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                   </svg>
+                </div>
+                <h2 className="text-2xl font-black text-slate-800 mb-2 tracking-tight">上传序列文件</h2>
+                <p className="text-slate-400 text-sm font-medium">支持 .gb, .fasta, .dna, .methdna</p>
+              </button>
             </div>
-            <h2 className="text-4xl font-black text-slate-800 mb-4 tracking-tight">导入序列开始设计</h2>
-          </button>
+
+            <div className="flex flex-col p-8 bg-white rounded-[3rem] shadow-xl border border-slate-100 hover:shadow-2xl transition-all duration-300 h-full">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center">
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+                </div>
+                <h2 className="text-2xl font-black text-slate-800 tracking-tight">粘贴 DNA 序列</h2>
+              </div>
+              
+              <div className="relative flex-1 group">
+                <textarea 
+                  value={pastedSequence}
+                  onChange={(e) => setPastedSequence(e.target.value)}
+                  placeholder="在此处直接粘贴原始 DNA 序列内容..."
+                  className="w-full h-40 p-4 bg-slate-50 border-2 border-slate-100 rounded-2xl dna-font text-sm font-bold text-slate-700 outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 transition-all resize-none placeholder:text-slate-300"
+                />
+                <div className="absolute bottom-3 right-3 text-[10px] font-black text-slate-400 bg-white/80 px-2 py-1 rounded-md border border-slate-200 uppercase tracking-widest">
+                  {pastedSequence.replace(/[^atcgATCG]/g, '').length} bp
+                </div>
+              </div>
+
+              <button 
+                onClick={handlePasteImport}
+                disabled={pastedSequence.replace(/[^atcgATCG]/g, '').length < 10}
+                className="mt-6 w-full py-4 bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-2xl text-sm font-black uppercase tracking-widest shadow-lg shadow-emerald-200 hover:from-emerald-700 hover:to-teal-700 transition-all active:scale-[0.98] disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed"
+              >
+                立即开始设计
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -285,6 +343,7 @@ const App: React.FC = () => {
           initialIsMGB={editingPrimer?.isMGB}
           thermoSettings={thermoSettings}
           existingPrimers={data.primers}
+          fullProjectData={data} 
           onConfirm={handleAddOrUpdatePrimer}
           onDelete={handleDeletePrimer}
           onCancel={() => {
