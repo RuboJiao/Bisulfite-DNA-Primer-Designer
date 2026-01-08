@@ -7,142 +7,20 @@ export const COMPLEMENTS: Record<string, string> = {
 };
 
 export const IUPAC_MAP: Record<string, string[]> = {
-  'A': ['A'], 'a': ['A'],
-  'T': ['T'], 't': ['T'],
-  'C': ['C'], 'c': ['C'],
-  'G': ['G'], 'g': ['G'],
-  'R': ['A', 'G'],
-  'Y': ['C', 'T'],
-  'S': ['G', 'C'],
-  'W': ['A', 'T'],
-  'K': ['G', 'T'],
-  'M': ['A', 'C'],
-  'B': ['C', 'G', 'T'],
-  'D': ['A', 'G', 'T'],
-  'H': ['A', 'C', 'T'],
-  'V': ['A', 'C', 'G'],
-  'N': ['A', 'T', 'C', 'G'],
+  'A': ['A'], 'a': ['A'], 'T': ['T'], 't': ['T'], 'C': ['C'], 'c': ['C'], 'G': ['G'], 'g': ['G'],
+  'R': ['A', 'G'], 'Y': ['C', 'T'], 'S': ['G', 'C'], 'W': ['A', 'T'], 'K': ['G', 'T'], 'M': ['A', 'C'],
+  'B': ['C', 'G', 'T'], 'D': ['A', 'G', 'T'], 'H': ['A', 'C', 'T'], 'V': ['A', 'C', 'G'], 'N': ['A', 'T', 'C', 'G'],
 };
 
+// 默认值严格对标 IDT OligoAnalyzer (Standard Desalting)
 export const DEFAULT_THERMO_SETTINGS: ThermodynamicSettings = {
-  oligoConc: 0.2,
-  naConc: 50,
-  mgConc: 3,
-  dntpConc: 0.8
+  oligoConc: 0.25, // 0.25 µM
+  naConc: 50,     // 50 mM
+  mgConc: 0,      // 0 mM
+  dntpConc: 0     // 0 mM
 };
 
-export const isBaseCompatible = (primerBase: string, templateBase: string): boolean => {
-  if (!primerBase || !templateBase) return false;
-  const p = primerBase.toUpperCase();
-  const t = templateBase.toUpperCase();
-  if (!IUPAC_MAP[p]) return p === t;
-  return IUPAC_MAP[p].includes(t);
-};
-
-export const getComplement = (seq: string): string => {
-  return seq.split('').map(b => COMPLEMENTS[b] || b).join('');
-};
-
-export const getReverseComplement = (seq: string): string => {
-  return getComplement(seq).split('').reverse().join('');
-};
-
-export const calculateThermodynamics = (
-  rawSequence: string, 
-  templateSequence: string = "", 
-  isMGB: boolean = false,
-  settings: ThermodynamicSettings = DEFAULT_THERMO_SETTINGS
-): any => {
-  const bindingSequence = rawSequence.replace(/\[[^\]]*\]/g, '');
-  const cleanTemplate = templateSequence.replace(/\[[^\]]*\]/g, '');
-  
-  const n = bindingSequence.length;
-  if (n < 2) return { tm: 0, dg: 0, gc: 0 };
-
-  const lnaPositions = bindingSequence.split('').map((char, i) => /[A-Z]/.test(char) ? i : -1).filter(i => i !== -1);
-  const seq = bindingSequence.toLowerCase();
-  const tSeq = cleanTemplate.toLowerCase();
-
-  let dh = 0; 
-  let ds = 0; 
-
-  for (let i = 0; i < n - 1; i++) {
-    const p1 = seq[i], p2 = seq[i+1];
-    const t1 = tSeq[i] || '', t2 = tSeq[i+1] || '';
-    const m1 = cleanTemplate ? isBaseCompatible(p1, t1) : true;
-    const m2 = cleanTemplate ? isBaseCompatible(p2, t2) : true;
-
-    if (m1 && m2) {
-      const pair = p1 + p2;
-      const p = NN_PARAMS[pair];
-      if (p) { dh += p.h; ds += p.s; }
-    } else {
-      dh += -1.2; 
-      ds += -4.5; 
-    }
-  }
-
-  const firstMatch = cleanTemplate ? isBaseCompatible(seq[0], tSeq[0]) : true;
-  const lastMatch = cleanTemplate ? isBaseCompatible(seq[n-1], tSeq[n-1]) : true;
-
-  dh += 0.2; ds += -5.7;
-
-  if (firstMatch && (seq[0] === 'a' || seq[0] === 't')) { dh += 2.2; ds += 6.9; }
-  if (lastMatch && (seq[n-1] === 'a' || seq[n-1] === 't')) { dh += 2.2; ds += 6.9; }
-
-  if (!firstMatch) { dh += 4.5; ds += 12.0; }
-  if (!lastMatch) { dh += 5.5; ds += 15.0; } 
-
-  const R = 1.987; 
-  const T_std = 273.15 + 37; 
-  const Ct = settings.oligoConc * 1e-6; 
-  const k = Ct / 4; 
-  
-  const tm1M = ((dh * 1000) / (ds + R * Math.log(k))) - 273.15;
-  const invTm1M = 1 / (tm1M + 273.15);
-
-  const monovalent = settings.naConc / 1000; 
-  const mg = settings.mgConc / 1000; 
-  const dntp = settings.dntpConc / 1000; 
-  const freeMg = Math.max(0.0000001, mg - dntp); 
-  const gcCount = (seq.match(/[gc]/g) || []).length;
-  const fGC = gcCount / n;
-  let invTmSalt = invTm1M;
-
-  if (freeMg === 0.0000001 || monovalent > freeMg * 100) {
-    const lnNa = Math.log(monovalent);
-    invTmSalt = invTm1M + (4.29 * fGC - 3.95) * 1e-5 * lnNa + 9.4e-6 * Math.pow(lnNa, 2);
-  } else {
-    const lnMg = Math.log(freeMg);
-    const a = 3.92e-5, b = -9.11e-6, c = 6.26e-5, d = 1.42e-5, e = -4.82e-4, f = 5.25e-4, g = 1.07e-5;
-    invTmSalt = invTm1M + a + b * lnMg + fGC * (c + d * lnMg) + 
-                (1 / (2 * (n - 1))) * (e + f * lnMg + g * Math.pow(lnMg, 2));
-  }
-
-  let tm = (1 / invTmSalt) - 273.15;
-
-  if (lnaPositions.length > 0) {
-    lnaPositions.forEach(pos => {
-      const isMatched = cleanTemplate ? isBaseCompatible(bindingSequence[pos], tSeq[pos]) : true;
-      if (isMatched) {
-        const boost = (seq[pos] === 'g' || seq[pos] === 'c') ? 5.2 : 3.8;
-        tm += boost;
-      } else {
-        tm -= 6.5; 
-      }
-    });
-  }
-
-  if (isMGB) {
-    const matchCount = cleanTemplate ? bindingSequence.split('').filter((b, i) => isBaseCompatible(b, tSeq[i])).length : n;
-    const matchRatio = matchCount / n;
-    const mgbBoost = (19.5 - (0.12 * (fGC * 100))) * Math.pow(matchRatio, 2);
-    tm += mgbBoost;
-  }
-
-  return { tm, dg: dh - (T_std * ds / 1000), gc: (gcCount / n) * 100 };
-};
-
+// SantaLucia 1998 NN Parameters (dH: kcal/mol, dS: cal/K·mol)
 const NN_PARAMS: Record<string, { h: number; s: number }> = {
   'aa': { h: -7.9, s: -22.2 }, 'tt': { h: -7.9, s: -22.2 },
   'at': { h: -7.2, s: -20.4 }, 'ta': { h: -7.2, s: -21.3 },
@@ -154,188 +32,263 @@ const NN_PARAMS: Record<string, { h: number; s: number }> = {
   'gg': { h: -8.0, s: -19.9 }, 'cc': { h: -8.0, s: -19.9 },
 };
 
-export const findMostStableDimer = (s1: string, s2: string): any => {
-  const q1 = s1.replace(/[\[\]]/g, '').toUpperCase();
-  const q2 = s2.replace(/[\[\]]/g, '').toUpperCase();
-  const q2Rev = q2.split('').reverse().join(''); 
-  let bestDG = 0;
-  let bestResult: any = null;
-  for (let shift = -q2.length + 1; shift < q1.length; shift++) {
-    let matches = 0;
-    let currentDG = 0;
-    const overlapStart = Math.max(0, shift);
-    const overlapEnd = Math.min(q1.length, shift + q2.length);
-    const matchChars: string[] = [];
-    for (let i = overlapStart; i < overlapEnd; i++) {
-      const b1 = q1[i];
-      const b2 = q2Rev[i - shift];
-      if (b1 === getComplement(b2).toUpperCase()) { 
-        matchChars.push('|'); 
-        matches++; 
-        currentDG -= 1.8; 
-      }
-      else { 
-        matchChars.push(' '); 
-        currentDG += 0.3; 
-      }
+export const calculateThermodynamics = (
+  rawSequence: string, 
+  templateSequence: string = "", 
+  isMGB: boolean = false,
+  settings: ThermodynamicSettings = DEFAULT_THERMO_SETTINGS
+): any => {
+  // 1. 严格提取结合区序列（剔除 [tail]）
+  const bindingSequence = rawSequence.replace(/\[[^\]]*\]/g, '').replace(/[^a-zA-Z]/g, '').toLowerCase();
+  const n = bindingSequence.length;
+  if (n < 2) return { tm: 0, dg: 0, gc: 0 };
+
+  const tSeq = templateSequence.replace(/[^a-zA-Z]/g, '').toLowerCase();
+  
+  let dh = 0; 
+  let ds = 0; 
+  let mismatchCount = 0;
+
+  // 2. NN Summation & Mismatch Check
+  for (let i = 0; i < n - 1; i++) {
+    const pair = bindingSequence[i] + bindingSequence[i+1];
+    const p = NN_PARAMS[pair];
+    if (p) { 
+      dh += p.h; 
+      ds += p.s; 
     }
-    if (matches >= 2 && currentDG < bestDG) {
-      bestDG = currentDG;
-      const indent1 = shift < 0 ? Math.abs(shift) : 0;
-      const indent2 = shift > 0 ? shift : 0;
-      bestResult = { dg: bestDG, alignment: [
-        `5' ${" ".repeat(indent1)}${q1} 3'`,
-        `   ${" ".repeat(indent1 + (shift > 0 ? (shift - indent1) : 0))}${matchChars.join('')}`,
-        `3' ${" ".repeat(indent2)}${q2Rev} 5'`
-      ]};
+    
+    // 简单的错配惩罚：如果提供了模板且不兼容
+    if (tSeq && tSeq[i] && !isBaseCompatible(bindingSequence[i], tSeq[i])) {
+      mismatchCount++;
     }
   }
-  return bestResult;
-};
+  if (tSeq && tSeq[n-1] && !isBaseCompatible(bindingSequence[n-1], tSeq[n-1])) {
+    mismatchCount++;
+  }
 
-/**
- * 优化后的 3' Hairpin 搜索逻辑 (符合 Primer3 逻辑)
- * 1. 强制要求 3' 末端最后一个碱基参与互补配对
- * 2. 扩大环搜索范围至 60nt，以识别长序列折叠风险
- * 3. 使用更精确的 ΔG 模型寻找最稳定结构
- */
-export const findMostStableHairpin = (sequence: string): any => {
-  const seq = sequence.replace(/[\[\]]/g, '').toUpperCase();
-  const n = seq.length;
-  let bestDG = 0;
-  let bestResult: any = null;
+  // 3. Initiation Energy (SantaLucia 1998)
+  dh += 0.2; 
+  ds += -5.7;
 
-  // 3' hairpin 必须包含序列末尾 (n-1)
-  const stem2End = n; 
+  // 4. Terminal AT Penalty
+  if (bindingSequence[0] === 'a' || bindingSequence[0] === 't') { dh += 2.2; ds += 6.9; }
+  if (bindingSequence[n-1] === 'a' || bindingSequence[n-1] === 't') { dh += 2.2; ds += 6.9; }
 
-  // 1. 茎长范围：2bp - 14bp (覆盖更强的互补结构)
-  // 2. 环长范围：3nt - 60nt (覆盖更广的距离)
-  for (let stemLen = 2; stemLen <= 14; stemLen++) {
-    for (let loopLen = 3; loopLen <= 60; loopLen++) {
-      const stem2Start = stem2End - stemLen;
-      const loopStart = stem2Start - loopLen;
-      const stem1Start = loopStart - stemLen;
-      
-      if (stem1Start < 0) continue;
-      
-      const stem1 = seq.substring(stem1Start, stem1Start + stemLen);
-      const stem2 = seq.substring(stem2Start, stem2End);
-      
-      // 核心原则：末端碱基必须互补
-      const lastBaseMatch = stem2[stemLen - 1] === getComplement(stem1[0]).toUpperCase();
-      if (!lastBaseMatch) continue;
+  const R = 1.9872; 
+  const k = (Math.max(settings.oligoConc, 1e-9) * 1e-6) / 4;
 
-      // 整个茎部是否反向互补
-      if (stem1 === getReverseComplement(stem2).toUpperCase()) {
-        // 计算茎能量 (GC rich 更稳定)
-        let stemEnergy = 0;
-        for (let i = 0; i < stemLen; i++) {
-            const b = stem1[i];
-            stemEnergy += (b === 'G' || b === 'C') ? -3.4 : -1.8;
-        }
+  // 1M Na+ 状态下的基础 Tm (Kelvin)
+  const tm1MK = (dh * 1000) / (ds + R * Math.log(k));
 
-        /**
-         * 环能量模型：
-         * - 基础惩罚：4.5 kcal/mol
-         * - 长度惩罚：使用对数模型或近似线性段落
-         * - 3' 端系数：由于 3' 发夹对聚合酶活性干扰极大，对其 ΔG 进行权重下调（显得更负/更危险）
-         */
-        let loopEnergy = 4.5;
-        if (loopLen > 10) {
-            loopEnergy += (loopLen - 10) * 0.25; 
-        } else {
-            loopEnergy += loopLen * 0.4;
-        }
-        
-        const dg = stemEnergy + loopEnergy;
-        
-        // 寻找最稳定（ΔG 最小）的结构
-        if (dg < bestDG) {
-          bestDG = dg;
-          
-          const prefix = seq.substring(0, stem1Start);
-          const loop = seq.substring(loopStart, loopStart + loopLen);
-          
-          const label5 = "5'-";
-          const label3 = "3'-";
-          const stem2Rev = stem2.split('').reverse().join('');
-          
-          // 如果环太长，在显示时进行截断提示
-          const displayLoop = loop.length > 20 ? `${loop.slice(0, 8)}...${loop.slice(-8)}` : loop;
+  // 5. Salt Correction (Owczarzy 2004 / 2008)
+  const Na = (settings.naConc || 0) * 1e-3;
+  const Mg = (settings.mgConc || 0) * 1e-3;
+  const dNTP = (settings.dntpConc || 0) * 1e-3;
+  
+  // Calculate Free Mg
+  const Mg_free = Math.max(0, Mg - dNTP);
+  
+  // Monovalent ion concentration (IDT treats NaConc as Total Monovalent)
+  const Mon = Na;
+  
+  // Ratio R = sqrt(Mg_free) / Mon
+  const R_ratio = Math.sqrt(Mg_free) / (Mon === 0 ? 1e-9 : Mon);
 
-          /**
-           * 修复对齐逻辑：
-           * Line 1: [label5][prefix][stem1]
-           * Line 2: [padding][|||||][loop]
-           * Line 3: [label3][padding][stem2Rev]
-           * 确保 stem1StartPos 统一。
-           */
-          const prefixPadding = " ".repeat(prefix.length);
-          const labelPadding = " ".repeat(label5.length + prefix.length);
+  const gcCount = (bindingSequence.match(/[gc]/g) || []).length;
+  const fGC = gcCount / n;
+  
+  let tmK = tm1MK;
 
-          bestResult = { 
-            dg, 
-            alignment: [
-              `${label5}${prefix}${stem1}--\\`,
-              `${labelPadding}${"|".repeat(stemLen)}   ${displayLoop}`,
-              `${label3}${prefixPadding}${stem2Rev}--/`
-            ]
-          };
-        }
-      }
+  if (Mon === 0 && Mg_free === 0) {
+     tmK = 0; // 如果无盐环境，Tm 设为绝对零度 (0K)
+  } else if (Mon > 0 && (Mg_free === 0 || R_ratio < 0.22)) {
+     const lnNa = Math.log(Mon);
+     const corr = (4.29 * fGC - 3.95) * 1e-5 * lnNa + 9.40 * 1e-6 * lnNa * lnNa;
+     tmK = 1 / (1/tm1MK + corr);
+  } else {
+     const lnMg = Math.log(Math.max(Mg_free, 1e-9));
+     const a = 3.92e-5;
+     const b = -9.11e-6;
+     const c = 6.26e-5;
+     const d = 1.42e-5;
+     const e = -4.82e-4;
+     const f = 5.25e-4;
+     const g = 8.31e-5;
+
+     const term1 = a + b * lnMg;
+     const term2 = fGC * (c + d * lnMg);
+     const term3 = (1 / (2 * (n - 1))) * (e + f * lnMg + g * lnMg * lnMg);
+     const corr = term1 + term2 + term3;
+     
+     tmK = 1 / (1/tm1MK + corr);
+  }
+
+  let tm = tmK - 273.15;
+
+  // 6. 修饰与错配调整 (仅在 Tm > 绝对零度时应用)
+  if (tmK > 0) {
+    // LNA 增益 (大写字母)
+    const lnaCount = rawSequence.replace(/\[[^\]]*\]/g, '').split('').filter(c => /[A-Z]/.test(c)).length;
+    tm += lnaCount * 4.0; 
+
+    // MGB 增益
+    if (isMGB) {
+      tm += (18.0 - (0.1 * (fGC * 100))); 
+    }
+
+    if (mismatchCount > 0) {
+      const mismatchPercent = (mismatchCount / n) * 100;
+      tm -= mismatchPercent * 1.2;
     }
   }
-  return bestResult;
+
+  return { 
+    tm: tm, 
+    dg: dh - (310.15 * ds / 1000), 
+    gc: fGC * 100 
+  };
 };
 
-export const searchSequence = (strandSeq: string, query: string, strandType: StrandType, maxMismatches: number): any[] => {
-  const results: any[] = [];
+export const isBaseCompatible = (p: string, t: string) => {
+  const pU = p.toUpperCase(), tU = t.toUpperCase();
+  return IUPAC_MAP[pU]?.includes(tU) || pU === tU;
+};
+
+export const getComplement = (seq: string) => seq.split('').map(b => COMPLEMENTS[b] || b).join('');
+
+export const getStrandSequence = (f: string, mF: number[], mR: number[], type: StrandType) => {
+  const fs = f.toLowerCase();
+  const rs = getComplement(fs);
+  const bisConvert = (s: string, indices: number[]) => s.split('').map((b, i) => (b === 'c' && !indices.includes(i)) ? 't' : b).join('');
+  
+  switch (type) {
+    case StrandType.F: return fs;
+    case StrandType.R: return rs;
+    case StrandType.OT: return bisConvert(fs, mF);
+    case StrandType.CTOT: return getComplement(bisConvert(fs, mF));
+    case StrandType.OB: return bisConvert(rs, mR);
+    case StrandType.CTOB: return getComplement(bisConvert(rs, mR));
+    default: return fs;
+  }
+};
+
+export const searchSequence = (strandSeq: string, query: string, strandType: StrandType, maxMismatches: number) => {
+  const results = [];
   const cleanQuery = query.replace(/[\[\]]/g, '');
-  const n = strandSeq.length;
-  const m = cleanQuery.length;
+  const n = strandSeq.length, m = cleanQuery.length;
   if (m === 0 || m > n) return [];
-  const isReversePhysical = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(strandType);
-  const searchPattern = isReversePhysical ? cleanQuery.split('').reverse().join('').toUpperCase() : cleanQuery.toUpperCase();
+  const isRev = [StrandType.R, StrandType.CTOT, StrandType.OB].includes(strandType);
+  const pattern = isRev ? cleanQuery.split('').reverse().join('').toUpperCase() : cleanQuery.toUpperCase();
   for (let i = 0; i <= n - m; i++) {
-    let mismatches = 0;
-    for (let j = 0; j < m; j++) {
-      if (!isBaseCompatible(searchPattern[j], strandSeq[i + j])) mismatches++;
-      if (mismatches > maxMismatches) break;
-    }
-    if (mismatches <= maxMismatches) results.push({ start: i, end: i + m - 1, mismatches });
+    let mis = 0;
+    for (let j = 0; j < m; j++) { if (!isBaseCompatible(pattern[j], strandSeq[i + j])) mis++; if (mis > maxMismatches) break; }
+    if (mis <= maxMismatches) results.push({ start: i, end: i + m - 1, mismatches: mis });
   }
   return results;
 };
 
-export const bisulfiteConvert = (seq: string, methylatedIndices: number[]): string => {
-  return seq.split('').map((base, idx) => {
-    if (base.toLowerCase() === 'c' && !methylatedIndices.includes(idx)) return 't';
-    return base;
-  }).join('');
-};
-
-export const getStrandSequence = (f_seq: string, methylatedF: number[], methylatedR: number[], type: StrandType): string => {
-  const f = f_seq.toLowerCase();
-  const r = getComplement(f);
-  switch (type) {
-    case StrandType.F: return f;
-    case StrandType.R: return r;
-    case StrandType.OT: return bisulfiteConvert(f, methylatedF);
-    case StrandType.CTOT: return getComplement(bisulfiteConvert(f, methylatedF));
-    case StrandType.OB: return bisulfiteConvert(r, methylatedR);
-    case StrandType.CTOB: return getComplement(bisulfiteConvert(r, methylatedR));
-    default: return f;
+export const findMostStableDimer = (s1: string, s2: string) => {
+  const q1 = s1.replace(/[\[\]]/g, '').toUpperCase(), q2 = s2.replace(/[\[\]]/g, '').toUpperCase();
+  const q2Rev = q2.split('').reverse().join(''); 
+  let best = null;
+  for (let shift = -q2.length + 1; shift < q1.length; shift++) {
+    let matches = 0, dg = 0;
+    const oS = Math.max(0, shift), oE = Math.min(q1.length, shift + q2.length);
+    const mC = [];
+    for (let i = oS; i < oE; i++) {
+      if (q1[i] === getComplement(q2Rev[i - shift]).toUpperCase()) { mC.push('|'); matches++; dg -= 1.8; }
+      else { mC.push(' '); dg += 0.3; }
+    }
+    if (matches >= 2 && dg < (best?.dg || 0)) {
+      const i1 = shift < 0 ? Math.abs(shift) : 0, i2 = shift > 0 ? shift : 0;
+      best = { dg, alignment: [`5' ${" ".repeat(i1)}${q1} 3'`, `   ${" ".repeat(i1 + (shift > 0 ? (shift - i1) : 0))}${mC.join('')}`, `3' ${" ".repeat(i2)}${q2Rev} 5'`]};
+    }
   }
+  return best;
 };
 
-export const parseFasta = (text: string): string => {
-  const lines = text.split('\n');
-  const seqLines = lines.filter(l => !l.startsWith('>') && l.trim().length > 0);
-  return seqLines.join('').replace(/[^atcgATCG]/g, '').toLowerCase();
+export const findMostStableHairpin = (sequence: string) => {
+  const seq = sequence.replace(/[\[\]]/g, '').toUpperCase();
+  const n = seq.length;
+  let best = null;
+
+  // 针对 3' 端发卡结构进行深度搜索
+  // sL: 茎长度 (Stem Length), lL: 环长度 (Loop Length)
+  // 遍历所有可能的茎长 (min 3) 和环长 (min 3)
+  // 强制 s2E (茎2结束位置) 为序列末端 n，即检测 3' 端是否参与互补
+  
+  for (let sL = 3; sL < n / 2; sL++) {
+    for (let lL = 3; lL <= n - 2 * sL; lL++) {
+      const s2E = n;
+      const s2S = n - sL;
+      const s1E = s2S - lL;
+      const s1S = s1E - sL; // s1S 是第一个茎的起始位置
+
+      if (s1S < 0) continue;
+
+      const st1 = seq.substring(s1S, s1S + sL);
+      const st2 = seq.substring(s2S, s2E); // 3' 端序列
+
+      // 检查互补性：st1 vs st2的反向互补
+      // 这里的 st2 是 3' 端序列，物理上是 5'->3'。发卡形成时，它是反向配对。
+      // st1 5'->3' 应与 st2 3'->5' 互补。
+      // 所以我们比较 st1 与 st2 的反向互补序列。
+      const st2RevComp = st2.split('').reverse().map(b => COMPLEMENTS[b] || 'N').join('');
+
+      if (st1 === st2RevComp) {
+        // 计算 ΔG (粗略估算)
+        // 茎部：GC对 -3.0，AT对 -2.0
+        let stemDg = 0;
+        for (const char of st1) {
+          stemDg += (char === 'G' || char === 'C') ? -3.0 : -2.0;
+        }
+        
+        // 环部惩罚：起步 +4.5，每增加 1nt +0.1 (简化模型)
+        const loopDg = 4.5 + (lL * 0.1); 
+        
+        const dg = stemDg + loopDg;
+
+        // 如果更稳定（能量更低），则更新
+        if (!best || dg < best.dg) {
+           const prefix = seq.substring(0, s1S);
+           const loop = seq.substring(s1E, s2S);
+           const st2Rev = st2.split('').reverse().join('');
+           
+           // 构建可视化对齐字符串
+           // 策略：Loop 显示在右侧中间行，通过 --\ 和 --/ 连接
+           
+           // Top:   5'-[Prefix][Stem1]--\
+           // Mid:             |||       [Loop]
+           // Bot:   3'-[Prefix][Stem2Rev]--/
+           
+           // 注意：Bottom 行只有 3'-[Spaces][Stem2Rev]--/ 
+           // Spaces 必须与 Prefix 长度一致，以保证 Stem2Rev 对齐 Stem1
+           
+           const indentStr = "5'-"; 
+           const indentLen = indentStr.length;
+           const prefixSpace = " ".repeat(prefix.length);
+           const indentSpace = " ".repeat(indentLen);
+           
+           const line1 = `${indentStr}${prefix}${st1}--\\`;
+           // 中间行：缩进 + Prefix占位 + 竖线 + 间隔 + Loop
+           const line2 = `${indentSpace}${prefixSpace}${"|".repeat(sL)}   ${loop}`;
+           // 底部行：3'- + Prefix占位 + Stem2Rev (显示方向为 3'->5' 视觉上从左到右) + 连接符
+           const line3 = `3'-${prefixSpace}${st2Rev}--/`;
+           
+           best = { 
+             dg, 
+             alignment: [line1, line2, line3] 
+           };
+        }
+      }
+    }
+  }
+  return best;
 };
 
-export const parseGenBank = (text: string): string => {
-  const originMatch = text.match(/ORIGIN\s+([\s\S]+)\/\//);
-  if (!originMatch) return parseFasta(text);
-  return originMatch[1].replace(/[0-9\s]/g, '').toLowerCase();
+export const parseGenBank = (t: string) => {
+  const m = t.match(/ORIGIN\s+([\s\S]+)\/\//);
+  const s = m ? m[1].replace(/[0-9\s]/g, '') : t.split('\n').filter(l => !l.startsWith('>')).join('').replace(/[^atcgATCG]/g, '');
+  return s.toLowerCase();
 };

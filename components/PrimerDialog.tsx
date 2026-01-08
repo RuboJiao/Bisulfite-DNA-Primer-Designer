@@ -158,7 +158,7 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
           </div>
         </div>
 
-        {/* 5'-3' 同向对齐视图 - 蓝框：高度缩小为 2/3 (min-h 140 -> 95)，内容靠下 */}
+        {/* 5'-3' 同向对齐视图 */}
         <div className="px-6 py-1 bg-white border-b border-slate-100">
            <div className="relative bg-slate-50 rounded-2xl p-4 border border-slate-100 shadow-inner overflow-x-auto min-h-[95px] flex flex-col justify-end">
               <div className="dna-font text-[14px] leading-none whitespace-pre flex flex-col gap-1 min-w-max pb-1">
@@ -222,7 +222,7 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
            </div>
         </div>
 
-        {/* 序列编辑器 - 红框：高度缩小为 1/2 (min-h 70 -> 38)，文字垂直居中 (py-4 -> py-1.5) */}
+        {/* 序列编辑器 */}
         <div className="flex-1 overflow-y-auto px-6 py-2 space-y-2">
           <div className="relative group">
             <div className="absolute -top-2.5 left-4 bg-white px-2 text-[9px] font-black text-slate-400 uppercase tracking-widest z-10">编辑引物序列</div>
@@ -234,7 +234,6 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
             />
           </div>
           
-          {/* 添加提示文字 */}
           <div className="px-1 text-[10px] text-slate-400 font-medium">
             提示：兼容简并碱基，大写字母为LNA修饰，[]中的碱基定义为与模板不互补的额外碱基序列
           </div>
@@ -268,7 +267,7 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
                   <>
                     <div className="absolute top-2 right-4 text-[10px] text-slate-400 font-black">ΔG = {hairpin.dg.toFixed(1)}</div>
                     <div className="text-xs font-bold mb-2 text-indigo-400 uppercase tracking-tighter">HAIRPIN STRUCTURE</div>
-                    <pre className="text-xs leading-relaxed text-amber-400">{hairpin.alignment.join('\n')}</pre>
+                    <pre className="text-xs leading-none tracking-normal text-amber-400 dna-font">{hairpin.alignment.join('\n')}</pre>
                   </>
                 ) : <div className="m-auto text-emerald-400 text-[10px] font-black uppercase tracking-widest">未检测到发卡风险</div>
               ) : activeTab === 'self' ? (
@@ -276,7 +275,7 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
                   <>
                     <div className="absolute top-2 right-4 text-[10px] text-slate-400 font-black">ΔG = {selfDimer.dg.toFixed(1)}</div>
                     <div className="text-xs font-bold mb-2 text-indigo-400 uppercase tracking-tighter">SELF-DIMER ALIGNMENT</div>
-                    <pre className="text-xs leading-relaxed text-amber-400">{selfDimer.alignment.join('\n')}</pre>
+                    <pre className="text-xs leading-none tracking-normal text-amber-400 dna-font">{selfDimer.alignment.join('\n')}</pre>
                   </>
                 ) : <div className="m-auto text-emerald-400 text-[10px] font-black uppercase tracking-widest">未检测到自身二聚体风险</div>
               ) : (
@@ -293,7 +292,7 @@ export const PrimerDialog: React.FC<PrimerDialogProps> = ({
                   {crossDimer ? (
                     <>
                       <div className="absolute top-10 right-4 text-[10px] text-slate-400 font-black">ΔG = {crossDimer.dg.toFixed(1)}</div>
-                      <pre className="text-xs leading-relaxed text-amber-400">{crossDimer.alignment.join('\n')}</pre>
+                      <pre className="text-xs leading-none tracking-normal text-amber-400 dna-font">{crossDimer.alignment.join('\n')}</pre>
                     </>
                   ) : <div className="py-8 text-center text-slate-500 text-[10px]">请选择另一条引物进行交叉分析</div>}
                 </div>

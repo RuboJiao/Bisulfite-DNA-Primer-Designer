@@ -9,8 +9,10 @@ interface DNAViewerProps {
   methylatedR: number[];
   primers: Primer[];
   selection: SelectionState | null;
+  selectedPrimerId: string | null;
   searchResults: SearchResult[];
   onSelectionChange: React.Dispatch<React.SetStateAction<SelectionState | null>>;
+  onSelectPrimer: (id: string | null) => void;
   onEditPrimer: (primer: Primer) => void;
 }
 
@@ -59,8 +61,10 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
   methylatedR,
   primers,
   selection,
+  selectedPrimerId,
   searchResults,
   onSelectionChange,
+  onSelectPrimer,
   onEditPrimer,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,6 +84,18 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
     return () => observer.disconnect();
   }, []);
 
+  // 新增：自动跳转至搜索结果
+  useEffect(() => {
+    if (searchResults.length > 0 && containerRef.current && basesPerLine > 0) {
+      const firstResult = searchResults[0];
+      const blockIndex = Math.floor(firstResult.start / basesPerLine);
+      const blocks = containerRef.current.querySelectorAll('.dna-block');
+      if (blocks[blockIndex]) {
+        blocks[blockIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }
+  }, [searchResults, basesPerLine]);
+
   const strandSequences = useMemo(() => {
     const map: Record<StrandType, string> = {} as any;
     STRANDS_ORDER.forEach(type => {
@@ -90,6 +106,7 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
 
   const handleMouseDown = (strand: StrandType, index: number) => {
     onSelectionChange({ strand, start: index, end: index });
+    onSelectPrimer(null); // 拖拽选择时取消引物选中
     const onMouseMove = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       const dataIdx = target.getAttribute('data-idx');
@@ -105,7 +122,7 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
     window.addEventListener('mouseup', onMouseUp);
   };
 
-  const isSelected = (index: number) => {
+  const isSelectedRange = (index: number) => {
     if (!selection) return false;
     const min = Math.min(selection.start, selection.end);
     const max = Math.max(selection.start, selection.end);
@@ -113,6 +130,7 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
   };
 
   const renderPrimer = (primer: Primer, currentBlockStart: number, currentBlockEnd: number) => {
+    const isSelected = selectedPrimerId === primer.id;
     const isForward = [StrandType.F, StrandType.OT, StrandType.CTOB].includes(primer.strand);
     const displaySeq = isForward ? primer.sequence : reverseSequenceWithBrackets(primer.sequence);
     
@@ -198,7 +216,7 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
     return (
       <div 
         key={primer.id}
-        className="absolute z-40"
+        className={`absolute ${isSelected ? 'z-[60]' : 'z-40'}`}
         style={{ 
           left: `${(primer.start - currentBlockStart) * BASE_WIDTH_PX}px`,
           top: `-18px`,
@@ -217,21 +235,32 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
           viewBox={`${minX} ${-OFFSET_TAIL} ${maxX - minX} ${H_BIND + OFFSET_TAIL}`}
           className="pointer-events-none"
         >
-          <path d={pathD} fill={theme.fill} stroke={theme.color} strokeWidth="1.2" strokeLinejoin="round" />
+          <path 
+            d={pathD} 
+            fill={theme.fill} 
+            stroke={isSelected ? '#2563eb' : theme.color} 
+            strokeWidth={isSelected ? "2.5" : "1.2"} 
+            strokeLinejoin="round" 
+            className="transition-all"
+          />
           
           {isForward ? (
-            <path d={`M ${lastBindX} 0 L ${lastBindX + 7} ${H_BIND/2} L ${lastBindX} ${H_BIND} Z`} fill={theme.color} />
+            <path d={`M ${lastBindX} 0 L ${lastBindX + 7} ${H_BIND/2} L ${lastBindX} ${H_BIND} Z`} fill={isSelected ? '#2563eb' : theme.color} />
           ) : (
-            <path d={`M 0 0 L -7 ${H_BIND/2} L 0 ${H_BIND} Z`} fill={theme.color} />
+            <path d={`M 0 0 L -7 ${H_BIND/2} L 0 ${H_BIND} Z`} fill={isSelected ? '#2563eb' : theme.color} />
           )}
 
           <text 
             x={minX - 6} 
             y={-OFFSET_TAIL + 8}
             textAnchor="end"
-            className="font-black uppercase italic pointer-events-auto cursor-pointer select-none hover:underline"
-            style={{ fontSize: '8px', fill: theme.color, opacity: 0.8 }}
-            onClick={(e) => { e.stopPropagation(); onEditPrimer(primer); }}
+            className={`font-black italic pointer-events-auto cursor-pointer select-none hover:underline ${isSelected ? 'underline' : ''}`}
+            style={{ fontSize: '9px', fill: isSelected ? '#1e40af' : theme.color, opacity: isSelected ? 1 : 0.8 }}
+            onClick={(e) => { 
+                e.stopPropagation(); 
+                if (isSelected) onEditPrimer(primer);
+                else onSelectPrimer(primer.id);
+            }}
           >
             {primer.name}
           </text>
@@ -247,12 +276,13 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
               <div 
                 key={idx} 
                 className="absolute flex items-center justify-center font-black pointer-events-auto cursor-pointer" 
+                onClick={(e) => { e.stopPropagation(); onSelectPrimer(primer.id); }}
                 onDoubleClick={(e) => { e.stopPropagation(); onEditPrimer(primer); }}
                 style={{ 
                   left: `${idx * unitWidth}px`, 
                   width: `${unitWidth}px`, 
                   height: `${H_BIND}px`,
-                  color: isMatch && !isDegenerate ? theme.color : undefined
+                  color: isMatch && !isDegenerate ? (isSelected ? '#1e40af' : theme.color) : undefined
                 }}
               >
                 <span className={!isMatch ? 'bg-rose-500 text-white rounded-[1px] px-[1px]' : isDegenerate ? 'bg-emerald-500 text-white rounded-[1px] px-[1px]' : ''}>
@@ -266,6 +296,7 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
             <div 
               key={`tail-${bindIdx}`} 
               className="absolute flex pointer-events-auto cursor-pointer" 
+              onClick={(e) => { e.stopPropagation(); onSelectPrimer(primer.id); }}
               onDoubleClick={(e) => { e.stopPropagation(); onEditPrimer(primer); }}
               style={{ 
                 left: bindIdx === 0 ? `-${content.length * unitWidth}px` : `${bindIdx * unitWidth}px`, 
@@ -305,10 +336,22 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
     blocks.push({ start: i, end: Math.min(i + basesPerLine - 1, sequence.length - 1) });
   }
 
+  // 辅助函数判断某个索引是否属于被选中的引物的绑定区域
+  const isIdxInSelectedPrimer = (globalIdx: number, strand: StrandType) => {
+    if (!selectedPrimerId) return false;
+    const p = primers.find(primer => primer.id === selectedPrimerId);
+    if (!p || p.strand !== strand) return false;
+    return globalIdx >= p.start && globalIdx < p.start + p.length;
+  };
+
   return (
-    <div ref={containerRef} className="flex-1 overflow-y-auto px-6 py-12 space-y-20 bg-white select-none dna-font">
+    <div 
+        ref={containerRef} 
+        className="flex-1 overflow-y-auto px-6 py-12 space-y-20 bg-white select-none dna-font"
+        onClick={() => onSelectPrimer(null)} // 点击空白处取消选中
+    >
       {blocks.map((block) => (
-        <div key={block.start} className="relative pl-12 pr-12">
+        <div key={block.start} className="dna-block relative pl-12 pr-12">
           <div className="absolute left-4 top-0 text-[10px] font-bold text-slate-300">
             {block.start + 1}
           </div>
@@ -341,15 +384,18 @@ export const DNAViewer: React.FC<DNAViewerProps> = ({
                         const globalIdx = block.start + idx;
                         const isC = base.toLowerCase() === 'c';
                         const isMethylated = activeMethylList.includes(globalIdx) && isC;
-                        const active = isSelected(globalIdx);
+                        const active = isSelectedRange(globalIdx);
+                        const isPrimerBindingHighlight = isIdxInSelectedPrimer(globalIdx, type);
+
                         return (
                           <div
                             key={globalIdx}
                             data-idx={globalIdx}
-                            onMouseDown={() => handleMouseDown(type, globalIdx)}
+                            onMouseDown={(e) => { e.stopPropagation(); handleMouseDown(type, globalIdx); }}
                             style={{ width: `${BASE_WIDTH_PX}px` }}
                             className={`text-center cursor-pointer transition-colors shrink-0 h-full flex items-center justify-center
                               ${active ? 'bg-yellow-200 text-black outline outline-1 outline-yellow-400 z-30' : ''} 
+                              ${!active && isPrimerBindingHighlight ? 'bg-amber-100 outline outline-1 outline-amber-300 z-20' : ''}
                               ${isMethylated ? 'font-black text-red-600' : ''}`}
                           >
                             {isMethylated ? 'C' : base}

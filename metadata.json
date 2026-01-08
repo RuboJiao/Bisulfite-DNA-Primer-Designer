@@ -1,5 +1,5 @@
 {
-  "name": "BisulfiteDesigner",
+  "name": "BisPrimer by SeekGene",
   "description": "A high-performance DNA browser for designing primers for Bisulfite-converted DNA, supporting 6-strand visualization, methylation marking, and Tm calculation.",
   "requestFramePermissions": []
 }
