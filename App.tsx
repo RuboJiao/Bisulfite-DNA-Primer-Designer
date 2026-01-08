@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import { Header } from './components/Header';
 import { DNAViewer } from './components/DNAViewer';
@@ -71,9 +72,11 @@ const App: React.FC = () => {
       try {
         const parsed = JSON.parse(saved);
         if (parsed.data) setData(parsed.data);
-        // 如果旧设置的 Mg 为 1.5 (旧版默认)，则强制更新为 0 (对标 IDT 默认)
+        
         if (parsed.thermoSettings) {
-           if (parsed.thermoSettings.mgConc === 1.5) {
+           const { mgConc, dntpConc } = parsed.thermoSettings;
+           // 如果是旧版配置 (Mg=1.5 或 Mg=0 & dNTP=0)，则强制更新为新的默认配置
+           if (mgConc === 1.5 || (mgConc === 0 && (!dntpConc || dntpConc === 0))) {
              setThermoSettings(DEFAULT_THERMO_SETTINGS);
            } else {
              setThermoSettings(parsed.thermoSettings);
@@ -210,14 +213,6 @@ const App: React.FC = () => {
     const file = e.dataTransfer.files?.[0];
     if (file) {
       if (data.sequence) {
-         // 如果已经有数据，可以根据需求提示保存或直接覆盖，这里简单起见模拟点击了 Import 后的逻辑，
-         // 但为了体验顺滑，我们可以直接处理，或者弹出确认框。
-         // 鉴于目前逻辑，直接处理可能会丢失未保存进度。
-         // 简单处理：如果已有序列，弹窗提示保存逻辑比较复杂，
-         // 这里仅在首页（无序列）时支持拖拽，或者覆盖前确认。
-         // 实际上 UI 只有在 !data.sequence 时才显示大大的拖拽区。
-         // 如果在编辑界面拖拽，可以暂不处理，或者作为高级功能。
-         // 题目要求“拖入序列文件到首页窗口时”，所以主要关注 !data.sequence 的情况。
          if (confirm("是否覆盖当前项目？")) {
             await processFile(file);
          }
@@ -343,7 +338,6 @@ const App: React.FC = () => {
             </div>
            </div>
            
-           {/* 拖拽时的全局提示覆盖层 (可选，增强体验) */}
            {isDragging && (
              <div className="absolute inset-0 pointer-events-none flex items-center justify-center bg-blue-500/10 z-50 backdrop-blur-[2px]">
                 <div className="bg-white px-8 py-4 rounded-full shadow-2xl text-blue-600 font-black text-xl animate-bounce border border-blue-200">

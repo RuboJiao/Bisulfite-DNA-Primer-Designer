@@ -12,12 +12,11 @@ export const IUPAC_MAP: Record<string, string[]> = {
   'B': ['C', 'G', 'T'], 'D': ['A', 'G', 'T'], 'H': ['A', 'C', 'T'], 'V': ['A', 'C', 'G'], 'N': ['A', 'T', 'C', 'G'],
 };
 
-// 默认值严格对标 IDT OligoAnalyzer (Standard Desalting)
 export const DEFAULT_THERMO_SETTINGS: ThermodynamicSettings = {
   oligoConc: 0.25, // 0.25 µM
   naConc: 50,     // 50 mM
-  mgConc: 0,      // 0 mM
-  dntpConc: 0     // 0 mM
+  mgConc: 3,      // 3 mM
+  dntpConc: 0.8   // 0.8 mM
 };
 
 // SantaLucia 1998 NN Parameters (dH: kcal/mol, dS: cal/K·mol)
